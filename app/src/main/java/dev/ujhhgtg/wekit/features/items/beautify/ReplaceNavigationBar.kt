@@ -1,4 +1,4 @@
-package dev.ujhhgtg.wekit.features.items.beautify
+﻿package dev.ujhhgtg.wekit.features.items.beautify
 
 import android.app.Activity
 import android.content.Intent
@@ -76,6 +76,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.core.graphics.toColorInt
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Contacts
 import com.composables.icons.materialsymbols.outlined.Drag_handle
@@ -104,6 +105,7 @@ import dev.ujhhgtg.wekit.ui.content.FloatingBottomBar
 import dev.ujhhgtg.wekit.ui.content.FloatingBottomBarDefaults
 import dev.ujhhgtg.wekit.ui.content.FloatingBottomBarItem
 import dev.ujhhgtg.wekit.ui.content.TextButton
+import dev.ujhhgtg.wekit.ui.content.WeColorField
 import dev.ujhhgtg.wekit.ui.content.rememberViewBackdrop
 import dev.ujhhgtg.wekit.ui.utils.InjectedUiTheme
 import dev.ujhhgtg.wekit.ui.utils.LifecycleOwnerProvider
@@ -114,7 +116,7 @@ import dev.ujhhgtg.wekit.utils.reflection.int
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-@Feature(name = "美化首页底部导航栏", categories = ["界面美化"], description = "将首页底部导航栏替换为 Material Design 或 Backdrop 风格")
+@Feature(name = "缇庡寲棣栭〉搴曢儴瀵艰埅鏍?, categories = ["鐣岄潰缇庡寲"], description = "灏嗛椤靛簳閮ㄥ鑸爮鏇挎崲涓?Material Design 鎴?Backdrop 椋庢牸")
 object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
 
     private data class NavItem(
@@ -126,10 +128,10 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
 
     @Stable
     private val TAB_ITEMS = listOf(
-        NavItem(0, MaterialSymbols.Outlined.Home, MaterialSymbols.OutlinedFilled.Home, "主页"),
-        NavItem(1, MaterialSymbols.Outlined.Contacts, MaterialSymbols.OutlinedFilled.Contacts, "通讯录"),
-        NavItem(2, MaterialSymbols.Outlined.Explore, MaterialSymbols.OutlinedFilled.Explore, "发现"),
-        NavItem(3, MaterialSymbols.Outlined.Person, MaterialSymbols.OutlinedFilled.Person, "我")
+        NavItem(0, MaterialSymbols.Outlined.Home, MaterialSymbols.OutlinedFilled.Home, "涓婚〉"),
+        NavItem(1, MaterialSymbols.Outlined.Contacts, MaterialSymbols.OutlinedFilled.Contacts, "閫氳褰?),
+        NavItem(2, MaterialSymbols.Outlined.Explore, MaterialSymbols.OutlinedFilled.Explore, "鍙戠幇"),
+        NavItem(3, MaterialSymbols.Outlined.Person, MaterialSymbols.OutlinedFilled.Person, "鎴?)
     )
 
     private var useFloating by prefOption("nav_bar_use_floating", true)
@@ -141,6 +143,12 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
     private var barScalePercent by prefOption("nav_bar_scale", 100)
     private var tabOrder by prefOption("nav_bar_tab_order", TAB_ITEMS.joinToString(",") { it.wechatIndex.toString() })
     private var enabledTabs by prefOption("nav_bar_enabled_tabs", TAB_ITEMS.map { it.wechatIndex.toString() }.toSet())
+
+    // 鑷畾涔夊浘鏍囬鑹? 鐣欑┖琛ㄧず浣跨敤榛樿鍊?    private var activeColorHex by prefOption("nav_bar_active_color_hex", "")
+    private var inactiveColorHex by prefOption("nav_bar_inactive_color_hex", "")
+
+    private fun parseColor(value: String): Int? =
+        value.takeIf { it.isNotBlank() }?.let { runCatching { it.toColorInt() }.getOrNull() }
 
     private const val MIN_BLUR_RADIUS = 0
     private const val MAX_BLUR_RADIUS = 40
@@ -266,7 +274,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                     // `setCurrentItem(index, false)`), which is why the content snaps to the new
                     // tab instantly. Flipping it to true makes WxViewPager animate the same
                     // horizontal slide a finger swipe produces. Doing this inside the
-                    // `remapProgrammaticTab` guard keeps it scoped to actual tab changes — the
+                    // `remapProgrammaticTab` guard keeps it scoped to actual tab changes 鈥?the
                     // state-restore and first-layout paths never reach here. Non-adjacent jumps
                     // sweep past the pages in between, but MainTabUI sets an offscreen page
                     // limit of 4, so every one of them is alive and renders real content. The
@@ -304,8 +312,8 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
             val viewParent = viewPager.parent as ViewGroup
             val bottomTabViewGroup = viewParent.getChildAt(1) as ViewGroup
 
-            // WeChat's original bottom tab (LauncherUIBottomTabView) is kept alive — we only
-            // clear its children below — so its own OnClickListener (an `f8`/`r8` instance)
+            // WeChat's original bottom tab (LauncherUIBottomTabView) is kept alive 鈥?we only
+            // clear its children below 鈥?so its own OnClickListener (an `f8`/`r8` instance)
             // survives with its double-tap state machine and the LiveData event it fires.
             // Double-tapping the Chat tab makes that listener fire WeChat's "scroll to next
             // unread conversation" event, which MainUI already observes. We capture the
@@ -413,7 +421,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                     InjectedUiTheme {
                         val view = LocalView.current
 
-                        // Long-press "发现" tab to jump straight into the improved timeline.
+                        // Long-press "鍙戠幇" tab to jump straight into the improved timeline.
                         val openImproveSnsTimeline = {
                             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                             activity.startActivity(
@@ -433,14 +441,16 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                         val contactUnreadCount by contactUnreadCountState
 
                         val backgroundColor = if (isSystemInDarkTheme()) Color(0xFF191919) else Color(0xFFF7F7F7)
-                        val activeColor = MaterialTheme.colorScheme.primary
-                        val inactiveColor = if (isSystemInDarkTheme()) Color(0xFF999999) else Color(0xFF181818)
+                        val activeColor = parseColor(activeColorHex)?.let(::Color)
+                            ?: MaterialTheme.colorScheme.primary
+                        val inactiveColor = parseColor(inactiveColorHex)?.let(::Color)
+                            ?: if (isSystemInDarkTheme()) Color(0xFF999999) else Color(0xFF181818)
 
                         // Scale the bar by overriding the density rather than wrapping it in a
                         // graphicsLayer: every dp/sp inside (height, icons, pill, blur radius,
                         // shadows) is then laid out at the new size instead of being resampled,
                         // so the glass stays crisp and touch targets match what's drawn. Window
-                        // insets are unaffected — they round-trip through the same density.
+                        // insets are unaffected 鈥?they round-trip through the same density.
                         val baseDensity = LocalDensity.current
                         val scaledDensity = remember(baseDensity, barScale) {
                             Density(baseDensity.density * barScale, baseDensity.fontScale)
@@ -578,9 +588,9 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                             view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                                             onTabClicked(index)
                                         },
-                                        // Long-pressing the "发现" tab while it is already selected:
+                                        // Long-pressing the "鍙戠幇" tab while it is already selected:
                                         // the pill sits on top and eats the event, so the item's
-                                        // onLongPress modifier never fires — forward it here instead.
+                                        // onLongPress modifier never fires 鈥?forward it here instead.
                                         onTabReselectedLongPress = { index ->
                                             if (visibleTabItems[index].wechatIndex == 2) openImproveSnsTimeline()
                                         },
@@ -731,7 +741,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
         //
         // In WeChat 8.0.69, MainUI.q0() (onResume) calls:
         //   frostedContentView.a(true, tabBar.getHeight())
-        // synchronously during doOnCreate — before our hookAfter fires and
+        // synchronously during doOnCreate 鈥?before our hookAfter fires and
         // sets the tab bar to GONE. By that point bottomBlurAreaHeight is
         // already set to the real measured height. Worse, a() has a <= 0
         // fallback: if height is 0 it computes dimen.b2*density + nav_bar_height,
@@ -783,9 +793,11 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
             var barScaleInput by remember {
                 mutableFloatStateOf(barScalePercent.coerceIn(MIN_BAR_SCALE, MAX_BAR_SCALE).toFloat())
             }
+            var activeColorInput by remember { mutableStateOf(activeColorHex) }
+            var inactiveColorInput by remember { mutableStateOf(inactiveColorHex) }
 
             AlertDialogContent(
-                title = { Text("美化首页底部导航栏") },
+                title = { Text("缇庡寲棣栭〉搴曢儴瀵艰埅鏍?) },
                 text = {
                     DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
                         ListItem(
@@ -798,8 +810,8 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                     contentDescription = null,
                                 )
                             },
-                            headlineContent = { Text("页面管理") },
-                            supportingContent = { Text("开关页面及调整顺序, 下次启动微信生效") },
+                            headlineContent = { Text("椤甸潰绠＄悊") },
+                            supportingContent = { Text("寮€鍏抽〉闈㈠強璋冩暣椤哄簭, 涓嬫鍚姩寰俊鐢熸晥") },
                         )
                         ListItem(
                             trailingContent = {
@@ -807,8 +819,8 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                     animatePageChangeInput,
                                     { animatePageChangeInput = it })
                             },
-                            supportingContent = { Text("点击标签时滑动切换页面, 而非直接跳转") },
-                            headlineContent = { Text("启用页面切换动画") },
+                            supportingContent = { Text("鐐瑰嚮鏍囩鏃舵粦鍔ㄥ垏鎹㈤〉闈? 鑰岄潪鐩存帴璺宠浆") },
+                            headlineContent = { Text("鍚敤椤甸潰鍒囨崲鍔ㄧ敾") },
                         )
                         ListItem(
                             trailingContent = {
@@ -816,7 +828,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                     useFloatingInput,
                                     { useFloatingInput = it })
                             },
-                            headlineContent = { Text("使用悬浮底栏") },
+                            headlineContent = { Text("浣跨敤鎮诞搴曟爮") },
                         )
                         ListItem(
                             trailingContent = {
@@ -824,8 +836,8 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                     useBackdropInput,
                                     { useBackdropInput = it })
                             },
-                            supportingContent = { Text("需启用「使用悬浮底栏」") },
-                            headlineContent = { Text("启用液态玻璃效果") },
+                            supportingContent = { Text("闇€鍚敤銆屼娇鐢ㄦ偓娴簳鏍忋€?) },
+                            headlineContent = { Text("鍚敤娑叉€佺幓鐠冩晥鏋?) },
                         )
                         if (useBackdropInput) {
                             ListItem(
@@ -839,7 +851,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                 },
                                 headlineContent = {
                                     val r = blurRadiusInput.roundToInt()
-                                    Text(if (r <= 0) "模糊半径: 关闭 (完全透明)" else "模糊半径: $r")
+                                    Text(if (r <= 0) "妯＄硦鍗婂緞: 鍏抽棴 (瀹屽叏閫忔槑)" else "妯＄硦鍗婂緞: $r")
                                 },
                             )
                         }
@@ -849,9 +861,17 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                     hideLabelsInput,
                                     { hideLabelsInput = it })
                             },
-                            supportingContent = { Text("需启用「使用悬浮底栏」") },
-                            headlineContent = { Text("隐藏标签文本") },
+                            supportingContent = { Text("闇€鍚敤銆屼娇鐢ㄦ偓娴簳鏍忋€?) },
+                            headlineContent = { Text("闅愯棌鏍囩鏂囨湰") },
                         )
+                        WeColorField(
+                            label = "閫変腑鍥炬爣棰滆壊 (鐣欑┖ = 璺熼殢涓婚)",
+                            value = activeColorInput,
+                            onValueChange = { activeColorInput = it })
+                        WeColorField(
+                            label = "鏈€変腑鍥炬爣棰滆壊 (鐣欑┖ = 榛樿)",
+                            value = inactiveColorInput,
+                            onValueChange = { inactiveColorInput = it })
                         ListItem(
                             supportingContent = {
                                 Slider(
@@ -861,7 +881,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                     steps = (MAX_BAR_SCALE - MIN_BAR_SCALE) / BAR_SCALE_STEP - 1
                                 )
                             },
-                            headlineContent = { Text("底栏缩放: ${barScaleInput.roundToInt()}%") },
+                            headlineContent = { Text("搴曟爮缂╂斁: ${barScaleInput.roundToInt()}%") },
                         )
                         ListItem(
                             modifier = Modifier,
@@ -871,12 +891,12 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                     showFinderBadgeInput,
                                     { showFinderBadgeInput = it })
                             },
-                            supportingContent = { Text("包含朋友圈新通知数量等") },
-                            headlineContent = { Text("显示「发现」标签角标") },
+                            supportingContent = { Text("鍖呭惈鏈嬪弸鍦堟柊閫氱煡鏁伴噺绛?) },
+                            headlineContent = { Text("鏄剧ず銆屽彂鐜般€嶆爣绛捐鏍?) },
                         )
                     }
                 },
-                dismissButton = { TextButton(onDismiss) { Text("取消") } },
+                dismissButton = { TextButton(onDismiss) { Text("鍙栨秷") } },
                 confirmButton = {
                     Button(onClick = {
                         useFloating = useFloatingInput
@@ -886,8 +906,10 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                         showFinderBadge = showFinderBadgeInput
                         blurRadius = blurRadiusInput.roundToInt()
                         barScalePercent = barScaleInput.roundToInt()
+                        activeColorHex = activeColorInput.trim()
+                        inactiveColorHex = inactiveColorInput.trim()
                         onDismiss()
-                    }) { Text("确定") }
+                    }) { Text("纭畾") }
                 }
             )
         }
@@ -903,13 +925,13 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
 
             AlertDialogContent(
                 modifier = Modifier.fillMaxWidth(),
-                title = { Text("页面管理") },
+                title = { Text("椤甸潰绠＄悊") },
                 text = {
                     DefaultColumn {
                         Column {
-                            Text("显示与顺序", style = MaterialTheme.typography.titleSmall)
+                            Text("鏄剧ず涓庨『搴?, style = MaterialTheme.typography.titleSmall)
                             Text(
-                                "长按拖动手柄调整顺序，至少保留一个页面",
+                                "闀挎寜鎷栧姩鎵嬫焺璋冩暣椤哄簭锛岃嚦灏戜繚鐣欎竴涓〉闈?,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -939,7 +961,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                 ) {
                                     Icon(
                                         imageVector = MaterialSymbols.Outlined.Drag_handle,
-                                        contentDescription = "拖动${item.label}",
+                                        contentDescription = "鎷栧姩${item.label}",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
@@ -973,13 +995,13 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                         }
                     }
                 },
-                dismissButton = { TextButton(onDismiss) { Text("取消") } },
+                dismissButton = { TextButton(onDismiss) { Text("鍙栨秷") } },
                 confirmButton = {
                     Button(onClick = {
                         tabOrder = currentOrder.joinToString(",") { it.wechatIndex.toString() }
                         enabledTabs = currentEnabled.map(Int::toString).toSet()
                         onDismiss()
-                    }) { Text("确定") }
+                    }) { Text("纭畾") }
                 },
             )
         }
