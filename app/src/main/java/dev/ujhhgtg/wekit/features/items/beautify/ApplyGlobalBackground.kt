@@ -2,13 +2,20 @@ package dev.ujhhgtg.wekit.features.items.beautify
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.ImageView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.PickVisualMediaRequest
@@ -29,16 +36,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.core.view.isVisible
 import androidx.core.view.postDelayed
 import coil3.load
 import coil3.request.crossfade
 import dev.ujhhgtg.reflekt.reflekt
-import dev.ujhhgtg.reflekt.utils.Modifiers
 import dev.ujhhgtg.wekit.activity.TransparentActivity
 import dev.ujhhgtg.wekit.constants.PackageNames
 import dev.ujhhgtg.wekit.dexkit.abc.IResolveDex
-import dev.ujhhgtg.wekit.dexkit.dsl.dexMethod
 import dev.ujhhgtg.wekit.features.core.ClickableFeature
 import dev.ujhhgtg.wekit.features.core.Feature
 import dev.ujhhgtg.wekit.preferences.WePrefs.Companion.prefOption
@@ -51,69 +55,26 @@ import dev.ujhhgtg.wekit.utils.HostInfo
 import dev.ujhhgtg.wekit.utils.WeLogger
 import dev.ujhhgtg.wekit.utils.android.showToast
 import dev.ujhhgtg.wekit.utils.nul
-import java.util.WeakHashMap
+import dev.ujhhgtg.wekit.utils.reflection.ClassLoaders
 import kotlin.math.max
 import kotlin.math.roundToInt
 
 @Feature(
     name = "应用全局背景", categories = ["界面美化"],
-    description = "将聊天界面背景替换为图片，可铺满整个屏幕"
+    description = "将聊天界面背景替换为图片，铺满整个屏幕"
 )
 object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
 
     private const val TAG = "ApplyGlobalBackground"
 
-    private val methodInitImageView by dexMethod {
-        matcher {
-            declaredClass = "com.tencent.mm.ui.base.MultiTouchImageView"
-            modifiers(Modifiers.FINAL)
-            returnType = "void"
-            addInvoke {
-                declaredClass = "android.widget.ImageView"
-                name = "setScaleType"
-            }
-        }
-    }
-
     private var backgroundUri by prefOption("global_bg_uri", nul<String>())
     private var transparentStatusBar by prefOption("global_bg_transparent_status_bar", false)
-    private var opacity by prefOption("global_bg_opacity", 0.10f)
+    private var opacity by prefOption("global_bg_opacity", 1.0f)
 
     private const val OVERLAY_TAG = "wekit_global_bg_overlay"
     private const val APPLIED_URI_TAG_KEY = 0x55020001
+    private const val ORIGIN_BG_TAG_KEY = 0x55020002
     private const val APPLY_STATUS_BAR_DELAY_MS = 80L
-
-    /**
-     * Activities that must never receive the background overlay — full-screen media viewers,
-     * video recorders, scanners, and other UIs where a tinted overlay would be wrong.
-     *
-     * Note: ThumbPlayerViewContainer / ThumbPlayerVideoView are Views (FrameLayout / TextureView),
-     * not Activities, so they were removed from this list — they would never match here.
-     */
-    private val blacklistedActivities = setOf(
-        "${PackageNames.WECHAT}.plugin.sns.ui.SnsOnlineVideoActivity",
-        "${PackageNames.WECHAT}.plugin.recordvideo.activity.MMRecordUI",
-        "${PackageNames.WECHAT}.plugin.fav.ui.detail.FavoriteImgDetailUI",
-        "${PackageNames.WECHAT}.plugin.scanner.ui.BaseScanUI",
-        "${PackageNames.WECHAT}.plugin.finder.ui.FinderHomeAffinityUI",
-        "${PackageNames.WECHAT}.plugin.lite.ui.WxaLiteAppLiteUI",
-        "${PackageNames.WECHAT}.ui.chatting.gallery.ImageGalleryUI",
-        "${PackageNames.WECHAT}.ui.chatting.gallery.ImageGalleryGridUI",
-        "${PackageNames.WECHAT}.ui.chatting.gallery.MediaHistoryGalleryUI",
-        "${PackageNames.WECHAT}.plugin.subapp.ui.gallery.GestureGalleryUI",
-        "${PackageNames.WECHAT}.plugin.gallery.picker.view.ImageCropUI",
-        "${PackageNames.WECHAT}.plugin.sns.ui.SnsBrowseUI",
-        "${PackageNames.WECHAT}.plugin.finder.ui.FinderShareFeedRelUI",
-        "${PackageNames.WECHAT}.plugin.gallery.ui.ImagePreviewUI",
-        "${PackageNames.WECHAT}.plugin.gallery.ui.AlbumPreviewUI",
-        "${PackageNames.WECHAT}.plugin.luckymoney.ui.LuckyMoneyBeforeDetailUI",
-        "${PackageNames.WECHAT}.plugin.location_soso.SoSoProxyUI",
-        "${PackageNames.WECHAT}.plugin.finder.feed.ui.FinderProfileTimeLineUI",
-        "${PackageNames.WECHAT}.plugin.sns.ui.SnsGalleryUI",
-        "${PackageNames.WECHAT}.pluginsdk.ui.ProfileHdHeadImg",
-        "${PackageNames.WECHAT}.plugin.brandservice.ui.timeline.preload.ui.TmplWebViewMMUI",
-        "${PackageNames.WECHAT}.plugin.voip.ui.VideoActivity"
-    )
 
     override fun onEnable() {
         Activity::class.reflekt().apply {
@@ -139,7 +100,9 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
             }.hookAfter {
                 val activity = thisObject as Activity
                 applyTransparentStatusBarIfEnabled(activity)
-                applyBackground(activity)
+                if (isChattingActivity(activity)) {
+                    applyBackground(activity)
+                }
             }
 
             firstMethod {
@@ -151,40 +114,30 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
             }
         }
 
-        methodInitImageView.hookBefore {
-            val view = thisObject as ImageView
-            view.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-                override fun onViewAttachedToWindow(v: View) {
-                    val activity = activityOf(v.context) ?: return
-                    synchronized(activityAttachedViews) {
-                        activityAttachedViews.getOrPut(activity) { mutableSetOf() }.add(v)
-                    }
-                    WeLogger.d(TAG, "view attached to ${activity.javaClass.simpleName}")
-                    overlayFromActivity(activity)?.isVisible = false
-                }
+        hookChattingUiFragment()
+    }
 
-                override fun onViewDetachedFromWindow(v: View) {
-                    val activity = activityOf(v.context) ?: return
-                    val empty = synchronized(activityAttachedViews) {
-                        val set = activityAttachedViews[activity] ?: return
-                        set.remove(v)
-                        set.isEmpty()
-                    }
-                    if (empty) {
-                        WeLogger.d(TAG, "all views detached from ${activity.javaClass.simpleName}")
-                        overlayFromActivity(activity)?.isVisible = true
-                    }
-                }
-            })
+    /**
+     * 聊天界面的主触发点：ChattingUIFragment 布局就绪时把背景铺到窗口底层，
+     * 与 Activity 生命周期 hook 互补，避免只靠 Activity 类名判断在部分微信版本上失效。
+     */
+    private fun hookChattingUiFragment() {
+        runCatching {
+            val clazz = ClassLoaders.HOST.loadClass("com.tencent.mm.ui.chatting.ChattingUIFragment")
+            clazz.reflekt().firstMethod {
+                name = "getLayoutView"
+            }.hookAfter {
+                val layoutView = result as? View ?: return@hookAfter
+                val activity = activityOf(layoutView.context) ?: return@hookAfter
+                applyBackground(activity)
+            }
+        }.onFailure {
+            WeLogger.w(TAG, "failed to hook ChattingUIFragment.getLayoutView", it)
         }
     }
 
-    // Per-activity set of currently-attached MultiTouchImageViews.
-    // Using a Set means duplicate OnAttachStateChangeListener registrations (caused by
-    // t() being re-triggered via onMeasure after each setImageBitmap call on a recycled
-    // ViewPager page) are harmless: add/remove are idempotent on a Set, so the counter
-    // never goes negative regardless of how many listeners fire per attach/detach cycle.
-    private val activityAttachedViews = WeakHashMap<Activity, MutableSet<View>>()
+    private fun isChattingActivity(activity: Activity): Boolean =
+        activity.javaClass.name == "${PackageNames.WECHAT}.ui.chatting.ChattingUI"
 
     private fun activityOf(ctx: Context): Activity? {
         var c = ctx
@@ -195,11 +148,75 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
         return null
     }
 
-    private fun overlayFromActivity(activity: Activity): ImageView? =
-        findOverlay(activity.window?.decorView as? ViewGroup ?: return null)
+    private fun applyTransparentStatusBarIfEnabled(activity: Activity) {
+        if (!transparentStatusBar) return
+        if (!isChattingActivity(activity)) return
+        applyTransparentStatusBar(activity)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun applyTransparentStatusBar(activity: Activity) {
+        runCatching {
+            val window = activity.window ?: return
+            val decor = window.decorView as? ViewGroup ?: return
+
+            window.statusBarColor = Color.TRANSPARENT
+            window.navigationBarColor = Color.TRANSPARENT
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                window.isStatusBarContrastEnforced = false
+                window.isNavigationBarContrastEnforced = false
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                window.setDecorFitsSystemWindows(false)
+            } else {
+                @Suppress("DEPRECATION")
+                decor.systemUiVisibility = decor.systemUiVisibility or
+                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                        View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                        View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+            }
+
+            clearSystemBarBackgrounds(activity, decor)
+            decor.postDelayed(APPLY_STATUS_BAR_DELAY_MS) {
+                clearSystemBarBackgrounds(activity, decor)
+            }
+        }.onFailure {
+            WeLogger.w(TAG, "failed to apply transparent status bar", it)
+        }
+    }
+
+    @SuppressLint("DiscouragedApi")
+    private fun clearSystemBarBackgrounds(activity: Activity, decor: ViewGroup) {
+        for (resName in listOf("statusBarBackground", "navigationBarBackground")) {
+            val systemBarBackgroundId = activity.resources.getIdentifier(
+                resName,
+                "id",
+                "android"
+            )
+
+            if (systemBarBackgroundId != 0) {
+                decor.findViewById<View>(systemBarBackgroundId)?.makeTransparent()
+            }
+        }
+
+        setLastViewsTransparent(decor, 3)
+    }
+
+    private fun setLastViewsTransparent(viewGroup: ViewGroup, count: Int) {
+        val start = max(0, viewGroup.childCount - count)
+        for (index in start until viewGroup.childCount) {
+            val child = viewGroup.getChildAt(index)
+            val name = child.resourceEntryName().orEmpty()
+            if (name == "statusBarBackground" || name == "navigationBarBackground" ||
+                child.height <= statusBarHeightGuess(child)
+            ) {
+                child.makeTransparent()
+            }
+        }
+    }
 
     private const val MIN = 0.01f
-    private const val MAX = 0.80f
+    private const val MAX = 1.0f
     private val MINIMAX = MIN..MAX
     private fun Float.miniMaxed() = this.coerceIn(MINIMAX)
 
@@ -285,88 +302,23 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
         }
     }
 
-    private fun applyTransparentStatusBarIfEnabled(activity: Activity) {
-        if (!transparentStatusBar) return
-        if (!isChattingActivity(activity)) return
-        applyTransparentStatusBar(activity)
-    }
-
-    private fun isChattingActivity(activity: Activity): Boolean =
-        activity.javaClass.name == "${PackageNames.WECHAT}.ui.chatting.ChattingUI"
-
-    @Suppress("DEPRECATION")
-    private fun applyTransparentStatusBar(activity: Activity) {
-        runCatching {
-            val window = activity.window ?: return
-            val decor = window.decorView as? ViewGroup ?: return
-
-            window.statusBarColor = Color.TRANSPARENT
-            window.navigationBarColor = Color.TRANSPARENT
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                window.isStatusBarContrastEnforced = false
-                window.isNavigationBarContrastEnforced = false
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                window.setDecorFitsSystemWindows(false)
-            } else {
-                @Suppress("DEPRECATION")
-                decor.systemUiVisibility = decor.systemUiVisibility or
-                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-                        View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-                        View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-            }
-
-            clearSystemBarBackgrounds(activity, decor)
-            decor.postDelayed(APPLY_STATUS_BAR_DELAY_MS) {
-                clearSystemBarBackgrounds(activity, decor)
-            }
-        }.onFailure {
-            WeLogger.w(TAG, "failed to apply transparent status bar", it)
-        }
-    }
-
-    @SuppressLint("DiscouragedApi")
-    private fun clearSystemBarBackgrounds(activity: Activity, decor: ViewGroup) {
-        for (resName in listOf("statusBarBackground", "navigationBarBackground")) {
-            val systemBarBackgroundId = activity.resources.getIdentifier(
-                resName,
-                "id",
-                "android"
-            )
-
-            if (systemBarBackgroundId != 0) {
-                decor.findViewById<View>(systemBarBackgroundId)?.makeTransparent()
-            }
-        }
-
-        setLastViewsTransparent(decor, 3)
-    }
-
-    private fun setLastViewsTransparent(viewGroup: ViewGroup, count: Int) {
-        val start = max(0, viewGroup.childCount - count)
-        for (index in start until viewGroup.childCount) {
-            val child = viewGroup.getChildAt(index)
-            val name = child.resourceEntryName().orEmpty()
-            if (name == "statusBarBackground" || name == "navigationBarBackground" ||
-                child.height <= statusBarHeightGuess(child)
-            ) {
-                child.makeTransparent()
-            }
-        }
-    }
-
+    /**
+     * 背景主逻辑：把背景图铺到窗口最底层（覆盖整个屏幕，包括状态栏/导航栏区域），
+     * 并把聊天界面里的纯色背景视图清成透明，露出背景图。
+     */
     private fun applyBackground(activity: Activity) {
-        if (backgroundUri == null) return
-        if (!isChattingActivity(activity)) return
-        if (activity.javaClass.name in blacklistedActivities) return
-
-        val uri = backgroundUri ?: return
         val decor = activity.window?.decorView as? ViewGroup ?: return
-        val overlay = findOverlay(decor) ?: createOverlay(activity, decor)
+        val uri = backgroundUri
 
+        if (uri == null) {
+            restoreContentBackgrounds(decor)
+            findOverlay(decor)?.let { decor.removeView(it) }
+            return
+        }
+
+        val overlay = findOverlay(decor) ?: createOverlay(activity, decor)
         overlay.visibility = View.VISIBLE
         overlay.alpha = opacity
-        overlay.bringToFront()
 
         if (overlay.getTag(APPLIED_URI_TAG_KEY) != uri) {
             overlay.setTag(APPLIED_URI_TAG_KEY, uri)
@@ -374,12 +326,15 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
                 crossfade(true)
             }
         }
+
+        transparentizeContentBackgrounds(decor, overlay)
     }
 
     private fun createOverlay(context: Context, decor: ViewGroup): ImageView {
         return ImageView(context).apply {
             tag = OVERLAY_TAG
             background = null
+            setBackgroundColor(0xFFEDEDED.toInt())
             isClickable = false
             isFocusable = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -388,8 +343,7 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
-            elevation = 100f
-            decor.addView(this)
+            decor.addView(this, 0)
         }
     }
 
@@ -401,6 +355,55 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
             }
         }
         return null
+    }
+
+    private fun transparentizeContentBackgrounds(decor: ViewGroup, overlay: ImageView) {
+        for (index in 0 until decor.childCount) {
+            val child = decor.getChildAt(index)
+            if (child === overlay) continue
+            child.transparentizeTree()
+        }
+    }
+
+    /**
+     * 递归把纯色背景视图清成透明。只处理纯色/无背景的视图，
+     * 气泡等 drawable 背景保留，原背景记录到 tag 以便恢复。
+     */
+    private fun View.transparentizeTree() {
+        if (this is Button) return
+        val bg = background
+        if (bg == null || bg is ColorDrawable) {
+            if (getTag(ORIGIN_BG_TAG_KEY) == null) {
+                setTag(ORIGIN_BG_TAG_KEY, bg)
+            }
+            setBackgroundColor(Color.TRANSPARENT)
+        }
+        if (this is ViewGroup) {
+            for (index in 0 until childCount) {
+                getChildAt(index).transparentizeTree()
+            }
+        }
+    }
+
+    private fun restoreContentBackgrounds(decor: ViewGroup) {
+        for (index in 0 until decor.childCount) {
+            val child = decor.getChildAt(index)
+            if (child is ImageView && child.tag == OVERLAY_TAG) continue
+            child.restoreTree()
+        }
+    }
+
+    private fun View.restoreTree() {
+        val origin = getTag(ORIGIN_BG_TAG_KEY) as? Drawable
+        if (origin != null) {
+            setBackground(origin)
+            setTag(ORIGIN_BG_TAG_KEY, null)
+        }
+        if (this is ViewGroup) {
+            for (index in 0 until childCount) {
+                getChildAt(index).restoreTree()
+            }
+        }
     }
 
     private fun View.makeTransparent() {
@@ -435,16 +438,46 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
                 if (uri == null) return@registerForActivityResult
 
                 val contentResolver = HostInfo.application.contentResolver
-                runCatching {
-                    contentResolver.takePersistableUriPermission(
-                        uri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    )
-                }.onFailure {
-                    WeLogger.w(TAG, "failed to take persistable uri permission", it)
-                }
+                val storedUri = runCatching {
+                    val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: return@runCatching null
+                    val displayName = contentResolver.query(
+                        uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null
+                    )?.use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getString(0) else null
+                    } ?: "wekit_chat_bg.jpg"
+                    val values = ContentValues().apply {
+                        put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+                        put(
+                            MediaStore.Images.Media.MIME_TYPE,
+                            contentResolver.getType(uri) ?: "image/jpeg"
+                        )
+                        put(
+                            MediaStore.Images.Media.RELATIVE_PATH,
+                            "${Environment.DIRECTORY_PICTURES}/WeKit"
+                        )
+                    }
+                    val dest = contentResolver.insert(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
+                    ) ?: return@runCatching null
+                    contentResolver.openOutputStream(dest)?.use { it.write(bytes) }
+                        ?: return@runCatching null
+                    dest.toString()
+                }.getOrNull()
 
-                backgroundUri = uri.toString()
+                if (storedUri == null) {
+                    runCatching {
+                        contentResolver.takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        )
+                    }.onFailure {
+                        WeLogger.w(TAG, "failed to take persistable uri permission", it)
+                    }
+                    backgroundUri = uri.toString()
+                } else {
+                    backgroundUri = storedUri
+                }
                 showToast("背景图片已设置, 重启微信生效")
             }
 
