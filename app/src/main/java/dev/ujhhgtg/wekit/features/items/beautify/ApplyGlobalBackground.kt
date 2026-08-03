@@ -58,6 +58,7 @@ import dev.ujhhgtg.wekit.utils.nul
 import dev.ujhhgtg.wekit.utils.reflection.ClassLoaders
 import kotlin.math.max
 import kotlin.math.roundToInt
+import org.luckypray.dexkit.DexKitBridge
 
 @Feature(
     name = "应用全局背景", categories = ["界面美化"],
@@ -75,6 +76,10 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
     private const val APPLIED_URI_TAG_KEY = 0x55020001
     private const val ORIGIN_BG_TAG_KEY = 0x55020002
     private const val APPLY_STATUS_BAR_DELAY_MS = 80L
+
+    override fun resolveDex(dexKit: DexKitBridge) {
+        // 聊天界面 hook 通过运行时反射完成，无需 DexKit 符号查找。
+    }
 
     override fun onEnable() {
         Activity::class.reflekt().apply {
