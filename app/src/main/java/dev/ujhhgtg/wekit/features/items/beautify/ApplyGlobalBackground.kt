@@ -37,6 +37,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.view.postDelayed
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentActivity
 import coil3.load
 import coil3.request.crossfade
 import dev.ujhhgtg.reflekt.reflekt
@@ -76,6 +78,7 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
     private const val APPLIED_URI_TAG_KEY = 0x55020001
     private const val ORIGIN_BG_TAG_KEY = 0x55020002
     private const val APPLY_STATUS_BAR_DELAY_MS = 80L
+    private const val CHATTING_FRAGMENT_CLASS = "com.tencent.mm.ui.chatting.ChattingUIFragment"
 
     /** 设置了背景图片后重启即生效，无需手动打开功能开关。 */
     override val defaultEnabled: Boolean = true
@@ -108,7 +111,8 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
             }.hookAfter {
                 val activity = thisObject as Activity
                 applyTransparentStatusBarIfEnabled(activity)
-                if (isChattingActivity(activity)) {
+                if (isChattingScreen(activity)) {
+                    WeLogger.i(TAG, "chatting screen detected on ${activity.javaClass.name}")
                     applyBackground(activity)
                 }
             }
@@ -121,46 +125,29 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
                 applyTransparentStatusBarIfEnabled(activity)
             }
         }
-
-        hookChattingUiFragment()
     }
 
     /**
-     * 聊天界面的主触发点：ChattingUIFragment 创建布局时把背景铺到窗口底层。
-     * onCreateView 是 Fragment 框架方法，所有版本都存在，比 getLayoutView 更稳定。
-     * 与 Activity 生命周期 hook 互补，避免只靠 Activity 类名判断在部分微信版本上失效。
+     * 聊天界面判定：不依赖任何微信方法名（8.0.76 起 ChattingUIFragment 方法名被混淆）。
+     * 通过 Activity 类名 + FragmentManager 实例遍历双重确认。
      */
-    private fun hookChattingUiFragment() {
-        runCatching {
-            val clazz = ClassLoaders.HOST.loadClass("com.tencent.mm.ui.chatting.ChattingUIFragment")
-            clazz.reflekt().firstMethod {
-                name = "onCreateView"
-            }.hookAfter {
-                val layoutView = result as? View ?: return@hookAfter
-                val activity = activityOf(layoutView.context) ?: return@hookAfter
-                WeLogger.i(TAG, "ChattingUIFragment view created on ${activity.javaClass.name}")
-                applyBackground(activity)
-            }
-        }.onFailure {
-            WeLogger.w(TAG, "failed to hook ChattingUIFragment.onCreateView", it)
-        }
+    private fun isChattingScreen(activity: Activity): Boolean {
+        if (isChattingActivity(activity)) return true
+        val fragmentActivity = activity as? FragmentActivity ?: return false
+        return fragmentActivity.supportFragmentManager.fragments.any { containsChattingFragment(it) }
+    }
+
+    private fun containsChattingFragment(fragment: Fragment): Boolean {
+        if (fragment.javaClass.name == CHATTING_FRAGMENT_CLASS) return true
+        return fragment.childFragmentManager.fragments.any { containsChattingFragment(it) }
     }
 
     private fun isChattingActivity(activity: Activity): Boolean =
         activity.javaClass.name.startsWith("${PackageNames.WECHAT}.ui.chatting.ChattingUI")
 
-    private fun activityOf(ctx: Context): Activity? {
-        var c = ctx
-        while (c is android.content.ContextWrapper) {
-            if (c is Activity) return c
-            c = c.baseContext
-        }
-        return null
-    }
-
     private fun applyTransparentStatusBarIfEnabled(activity: Activity) {
         if (!transparentStatusBar) return
-        if (!isChattingActivity(activity)) return
+        if (!isChattingScreen(activity)) return
         applyTransparentStatusBar(activity)
     }
 
