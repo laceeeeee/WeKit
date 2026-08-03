@@ -486,8 +486,6 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                             else -> inactiveColor
                                         }
 
-                                        val showFilled = if (offset < 0.5f) isSelected else isNext
-
                                         NavigationBarItem(
                                             selected = isSelected && offset < 0.5f,
                                             onClick = {
@@ -526,17 +524,11 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                                         }
                                                     }
                                                 ) {
-                                                    Crossfade(
-                                                        targetState = showFilled,
-                                                        animationSpec = tween(200),
-                                                        label = "navIcon"
-                                                    ) { filled ->
-                                                        Icon(
-                                                            imageVector = if (filled) item.filled else item.outlined,
-                                                            contentDescription = item.label,
-                                                            tint = tint
-                                                        )
-                                                    }
+                                                    Icon(
+                                                        imageVector = item.outlined,
+                                                        contentDescription = item.label,
+                                                        tint = tint
+                                                    )
                                                 }
                                             },
                                             label = null,
@@ -651,16 +643,10 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                                         }
                                                     }
                                                 ) {
-                                                    Crossfade(
-                                                        targetState = isSelected,
-                                                        animationSpec = tween(200),
-                                                        label = "navIconFloating"
-                                                    ) { selected ->
-                                                        Icon(
-                                                            imageVector = if (selected) item.filled else item.outlined,
-                                                            contentDescription = item.label
-                                                        )
-                                                    }
+                                                    Icon(
+                                                        imageVector = item.outlined,
+                                                        contentDescription = item.label
+                                                    )
                                                 }
                                                 if (!hideLabels) {
                                                     Text(
