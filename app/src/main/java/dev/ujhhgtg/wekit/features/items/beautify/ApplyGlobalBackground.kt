@@ -356,8 +356,8 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
                     onSuccess = { _, _ ->
                         WeLogger.i(TAG, "background loaded OK on ${activity.javaClass.name}")
                     },
-                    onError = { _, throwable ->
-                        WeLogger.w(TAG, "background load failed on ${activity.javaClass.name}", throwable)
+                    onError = { _, result ->
+                        WeLogger.w(TAG, "background load failed on ${activity.javaClass.name}", result.throwable)
                     }
                 )
             }
