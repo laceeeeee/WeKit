@@ -123,7 +123,7 @@ jobs:
             echo "No keystore configured - falling back to debug signing"
             unset WEKIT_KEYSTORE_FILE WEKIT_KEYSTORE_PASSWORD WEKIT_KEY_ALIAS WEKIT_KEY_PASSWORD
           fi
-          ./gradlew assembleRelease --warning-mode all --stacktrace
+          ./gradlew assembleStandardRelease --warning-mode all --stacktrace
 
       - name: Collect APKs
         run: |
@@ -131,18 +131,16 @@ jobs:
           mkdir -p dist/apk
 
           expected_abis=$(printf '%s\n' arm64-v8a armeabi-v7a)
-          for flavor in standard legacy; do
-            apk="app/build/outputs/apk/$flavor/release/app-$flavor-release.apk"
-            test -f "$apk"
+          apk="app/build/outputs/apk/standard/release/app-standard-release.apk"
+          test -f "$apk"
 
-            actual_abis=$(unzip -Z1 "$apk" 'lib/*/*.so' | cut -d/ -f2 | sort -u)
-            if [ "$actual_abis" != "$expected_abis" ]; then
-              echo "::error file=$apk::Expected universal arm64-v8a + armeabi-v7a APK, got: $actual_abis"
-              exit 1
-            fi
+          actual_abis=$(unzip -Z1 "$apk" 'lib/*/*.so' | cut -d/ -f2 | sort -u)
+          if [ "$actual_abis" != "$expected_abis" ]; then
+            echo "::error file=$apk::Expected universal arm64-v8a + armeabi-v7a APK, got: $actual_abis"
+            exit 1
+          fi
 
-            cp -v "$apk" dist/apk/
-          done
+          cp -v "$apk" dist/apk/
 
           echo "Collected APKs:"
           ls -1 dist/apk
