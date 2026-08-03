@@ -40,6 +40,7 @@ import androidx.core.view.postDelayed
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
 import coil3.load
+import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
 import coil3.request.crossfade
 import dev.ujhhgtg.reflekt.reflekt
 import dev.ujhhgtg.wekit.activity.TransparentActivity
@@ -125,6 +126,36 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
                 applyTransparentStatusBarIfEnabled(activity)
             }
         }
+
+        hookChatFooter()
+    }
+
+    /**
+     * 聊天界面的主探针：ChatFooter 是微信 pluginsdk 的公共 SDK 类（8.0.76 未混淆），
+     * 只在聊天界面创建。它 attach 到窗口时整个聊天布局已就绪，此时铺背景最可靠，
+     * 完全绕开 8.0.76 中被混淆的 ChattingUIFragment 方法。
+     */
+    private fun hookChatFooter() {
+        runCatching {
+            ChatFooter::class.reflekt().firstMethod { name = "onAttachedToWindow" }.hookAfter {
+                val footer = thisObject as View
+                val activity = activityOf(footer.context) ?: return@hookAfter
+                WeLogger.i(TAG, "ChatFooter attached on ${activity.javaClass.name}")
+                applyBackground(activity)
+                if (transparentStatusBar) applyTransparentStatusBar(activity)
+            }
+        }.onFailure {
+            WeLogger.w(TAG, "failed to hook ChatFooter.onAttachedToWindow", it)
+        }
+    }
+
+    private fun activityOf(ctx: Context): Activity? {
+        var c = ctx
+        while (c is android.content.ContextWrapper) {
+            if (c is Activity) return c
+            c = c.baseContext
+        }
+        return null
     }
 
     /**
