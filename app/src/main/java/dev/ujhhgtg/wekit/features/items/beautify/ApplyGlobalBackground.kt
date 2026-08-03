@@ -6,7 +6,6 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Bundle
@@ -353,6 +352,14 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
             WeLogger.i(TAG, "loading background $uri on ${activity.javaClass.name}")
             overlay.load(uri) {
                 crossfade(true)
+                listener(
+                    onSuccess = { _, _ ->
+                        WeLogger.i(TAG, "background loaded OK on ${activity.javaClass.name}")
+                    },
+                    onError = { _, throwable ->
+                        WeLogger.w(TAG, "background load failed on ${activity.javaClass.name}", throwable)
+                    }
+                )
             }
         }
 
@@ -390,26 +397,22 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
         for (index in 0 until decor.childCount) {
             val child = decor.getChildAt(index)
             if (child === overlay) continue
-            child.transparentizeTree()
+            child.transparentizePageBackgrounds(child.height)
         }
     }
 
-    /**
-     * 递归把纯色背景视图清成透明。只处理纯色/无背景的视图，
-     * 气泡等 drawable 背景保留，原背景记录到 tag 以便恢复。
-     */
-    private fun View.transparentizeTree() {
+    private fun View.transparentizePageBackgrounds(parentHeight: Int) {
         if (this is Button) return
-        val bg = background
-        if (bg == null || bg is ColorDrawable) {
-            if (getTag(ORIGIN_BG_TAG_KEY) == null) {
-                setTag(ORIGIN_BG_TAG_KEY, bg)
-            }
-            setBackgroundColor(Color.TRANSPARENT)
+        if (getTag(ORIGIN_BG_TAG_KEY) == null) {
+            setTag(ORIGIN_BG_TAG_KEY, background)
         }
+        setBackgroundColor(Color.TRANSPARENT)
         if (this is ViewGroup) {
             for (index in 0 until childCount) {
-                getChildAt(index).transparentizeTree()
+                val child = getChildAt(index)
+                if (child.height >= parentHeight * 0.8f) {
+                    child.transparentizePageBackgrounds(child.height)
+                }
             }
         }
     }
