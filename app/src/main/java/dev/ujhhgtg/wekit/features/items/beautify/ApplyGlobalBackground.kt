@@ -57,7 +57,7 @@ import kotlin.math.roundToInt
 
 @Feature(
     name = "应用全局背景", categories = ["界面美化"],
-    description = "将微信背景全局替换为图片"
+    description = "将聊天界面背景替换为图片，可铺满整个屏幕"
 )
 object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
 
@@ -263,8 +263,8 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
                                     onCheckedChange = null
                                 )
                             },
-                            supportingContent = { Text("设置状态栏背景为透明") },
-                            headlineContent = { Text("状态栏背景透明") },
+                            supportingContent = { Text("仅在聊天界面生效，背景铺满整个屏幕") },
+                            headlineContent = { Text("状态栏/导航栏透明") },
                         )
                     }
                 },
@@ -287,8 +287,12 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
 
     private fun applyTransparentStatusBarIfEnabled(activity: Activity) {
         if (!transparentStatusBar) return
+        if (!isChattingActivity(activity)) return
         applyTransparentStatusBar(activity)
     }
+
+    private fun isChattingActivity(activity: Activity): Boolean =
+        activity.javaClass.name == "${PackageNames.WECHAT}.ui.chatting.ChattingUI"
 
     @Suppress("DEPRECATION")
     private fun applyTransparentStatusBar(activity: Activity) {
@@ -297,8 +301,10 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
             val decor = window.decorView as? ViewGroup ?: return
 
             window.statusBarColor = Color.TRANSPARENT
+            window.navigationBarColor = Color.TRANSPARENT
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 window.isStatusBarContrastEnforced = false
+                window.isNavigationBarContrastEnforced = false
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 window.setDecorFitsSystemWindows(false)
@@ -306,12 +312,13 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
                 @Suppress("DEPRECATION")
                 decor.systemUiVisibility = decor.systemUiVisibility or
                         View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-                        View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                        View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
             }
 
-            clearStatusBarBackground(activity, decor)
+            clearSystemBarBackgrounds(activity, decor)
             decor.postDelayed(APPLY_STATUS_BAR_DELAY_MS) {
-                clearStatusBarBackground(activity, decor)
+                clearSystemBarBackgrounds(activity, decor)
             }
         }.onFailure {
             WeLogger.w(TAG, "failed to apply transparent status bar", it)
@@ -319,15 +326,17 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
     }
 
     @SuppressLint("DiscouragedApi")
-    private fun clearStatusBarBackground(activity: Activity, decor: ViewGroup) {
-        val statusBarBackgroundId = activity.resources.getIdentifier(
-            "statusBarBackground",
-            "id",
-            "android"
-        )
+    private fun clearSystemBarBackgrounds(activity: Activity, decor: ViewGroup) {
+        for (resName in listOf("statusBarBackground", "navigationBarBackground")) {
+            val systemBarBackgroundId = activity.resources.getIdentifier(
+                resName,
+                "id",
+                "android"
+            )
 
-        if (statusBarBackgroundId != 0) {
-            decor.findViewById<View>(statusBarBackgroundId)?.makeTransparent()
+            if (systemBarBackgroundId != 0) {
+                decor.findViewById<View>(systemBarBackgroundId)?.makeTransparent()
+            }
         }
 
         setLastViewsTransparent(decor, 3)
@@ -338,7 +347,9 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
         for (index in start until viewGroup.childCount) {
             val child = viewGroup.getChildAt(index)
             val name = child.resourceEntryName().orEmpty()
-            if (name == "statusBarBackground" || child.height <= statusBarHeightGuess(child)) {
+            if (name == "statusBarBackground" || name == "navigationBarBackground" ||
+                child.height <= statusBarHeightGuess(child)
+            ) {
                 child.makeTransparent()
             }
         }
@@ -346,6 +357,7 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
 
     private fun applyBackground(activity: Activity) {
         if (backgroundUri == null) return
+        if (!isChattingActivity(activity)) return
         if (activity.javaClass.name in blacklistedActivities) return
 
         val uri = backgroundUri ?: return
