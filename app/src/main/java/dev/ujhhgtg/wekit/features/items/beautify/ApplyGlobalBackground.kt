@@ -77,6 +77,9 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
     private const val ORIGIN_BG_TAG_KEY = 0x55020002
     private const val APPLY_STATUS_BAR_DELAY_MS = 80L
 
+    /** 设置了背景图片后重启即生效，无需手动打开功能开关。 */
+    override val defaultEnabled: Boolean = true
+
     override fun resolveDex(dexKit: DexKitBridge) {
         // 聊天界面 hook 通过运行时反射完成，无需 DexKit 符号查找。
     }
@@ -123,26 +126,28 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
     }
 
     /**
-     * 聊天界面的主触发点：ChattingUIFragment 布局就绪时把背景铺到窗口底层，
+     * 聊天界面的主触发点：ChattingUIFragment 创建布局时把背景铺到窗口底层。
+     * onCreateView 是 Fragment 框架方法，所有版本都存在，比 getLayoutView 更稳定。
      * 与 Activity 生命周期 hook 互补，避免只靠 Activity 类名判断在部分微信版本上失效。
      */
     private fun hookChattingUiFragment() {
         runCatching {
             val clazz = ClassLoaders.HOST.loadClass("com.tencent.mm.ui.chatting.ChattingUIFragment")
             clazz.reflekt().firstMethod {
-                name = "getLayoutView"
+                name = "onCreateView"
             }.hookAfter {
                 val layoutView = result as? View ?: return@hookAfter
                 val activity = activityOf(layoutView.context) ?: return@hookAfter
+                WeLogger.i(TAG, "ChattingUIFragment view created on ${activity.javaClass.name}")
                 applyBackground(activity)
             }
         }.onFailure {
-            WeLogger.w(TAG, "failed to hook ChattingUIFragment.getLayoutView", it)
+            WeLogger.w(TAG, "failed to hook ChattingUIFragment.onCreateView", it)
         }
     }
 
     private fun isChattingActivity(activity: Activity): Boolean =
-        activity.javaClass.name == "${PackageNames.WECHAT}.ui.chatting.ChattingUI"
+        activity.javaClass.name.startsWith("${PackageNames.WECHAT}.ui.chatting.ChattingUI")
 
     private fun activityOf(ctx: Context): Activity? {
         var c = ctx
@@ -327,6 +332,7 @@ object ApplyGlobalBackground : ClickableFeature(), IResolveDex {
 
         if (overlay.getTag(APPLIED_URI_TAG_KEY) != uri) {
             overlay.setTag(APPLIED_URI_TAG_KEY, uri)
+            WeLogger.i(TAG, "loading background $uri on ${activity.javaClass.name}")
             overlay.load(uri) {
                 crossfade(true)
             }
