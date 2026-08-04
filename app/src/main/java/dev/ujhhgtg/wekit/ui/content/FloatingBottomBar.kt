@@ -179,11 +179,12 @@ fun FloatingBottomBar(
     isBlurEnabled: Boolean = true,
     // Radius of the glass blur, in dp. Larger = frostier / less legible content behind the bar.
     blurRadius: Dp = 8.dp,
-    // When false the liquid glass pill / translucent capsule is not drawn; a thin line
-    // matching [indicatorWidth] x [indicatorHeight] slides under the selected tab instead.
-    // In that mode the active-content overlay layer is skipped and each item colors itself
-    // from [FloatingBottomBarItem.selected].
+    // When false the liquid glass pill / translucent capsule is not drawn. In that mode the
+    // active-content overlay layer is skipped and each item colors itself from
+    // [FloatingBottomBarItem.selected]. If [showLineIndicator] is also false nothing at all is
+    // drawn over the tabs — the selected state is conveyed purely by the item content itself.
     showLiquidPill: Boolean = true,
+    showLineIndicator: Boolean = true,
     indicatorWidth: Dp = 24.dp,
     indicatorHeight: Dp = 2.dp,
     colors: FloatingBottomBarColors = FloatingBottomBarDefaults.colors(),
@@ -539,7 +540,7 @@ fun FloatingBottomBar(
                         )
                     }
                 }
-            } else {
+            } else if (showLineIndicator) {
                 // Line indicator: a thin bar as wide as the tab icon slides under the selected
                 // tab, keeping the damped spring so it still glides between tabs like the pill
                 // did. Height (56.dp) and bottom padding place it right below the 24.dp icon.
