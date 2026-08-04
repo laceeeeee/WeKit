@@ -9,6 +9,7 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
 import android.graphics.Rect
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.NinePatchDrawable
 import android.graphics.drawable.StateListDrawable
 import android.view.View
@@ -31,9 +32,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -79,6 +82,7 @@ import kotlin.io.path.div
 import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 import kotlin.io.path.getLastModifiedTime
+import kotlin.math.roundToInt
 
 @Feature(name = "自定义消息气泡", categories = ["界面美化", "聊天"], description = "自定义聊天中的消息气泡图片和颜色")
 object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener {
@@ -152,6 +156,17 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
     private var bgThatDark by prefOption("custom_bubbles_bg_that_dark", "#00000000")
     private var bgThisLight by prefOption("custom_bubbles_bg_this_light", "#00000000")
     private var bgThisDark by prefOption("custom_bubbles_bg_this_dark", "#00000000")
+
+    // 未导入气泡图片时，用圆角矩形替换微信默认气泡；0 = 关闭，保持默认气泡。
+    private var cornerRadiusDp by prefOption("custom_bubbles_corner_radius", 16f)
+    private val cornerRadiusRange = 0f..32f
+
+    private fun defaultBubbleColor(context: Context, isSelfSender: Boolean): Int =
+        if (isSelfSender) {
+            if (context.isDarkMode) 0xFF3B5F47.toInt() else 0xFF95EC69.toInt()
+        } else {
+            if (context.isDarkMode) 0xFF2C2C2C.toInt() else 0xFFFFFFFF.toInt()
+        }
 
     // A nine-patch source must keep at least one interior pixel once the marker border is stripped.
     private const val MIN_BUBBLE_SIZE_PX = 3
@@ -289,9 +304,7 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         val constantState = bubbleConstantState(fileName, resources)
 
         if (constantState == null) {
-            if (color != 0) {
-                bubbleView.background?.mutate()?.setTint(color)
-            }
+            applyRoundedBubble(bubbleView, isSelfSender, color)
             return
         }
 
@@ -326,11 +339,56 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
     }
 
     /**
-     * Returns the cached nine-patch state for [fileName], decoding it at most once per file
-     * revision. Safe to call from the bind path: [bubbleCache] is concurrent, and a redundant
-     * concurrent rebuild would only cost a duplicate decode, never a corrupt entry.
+     * 未导入气泡图片时的圆角矩形气泡：用 GradientDrawable 替换微信默认九宫格气泡
+     * （去掉小尾巴箭头），圆角半径与颜色（用户设置或微信默认色）均可调。
+     * 圆角半径 0 时保持微信默认气泡，仅按需 tint。
      */
-    private fun bubbleConstantState(fileName: String, resources: Resources): Drawable.ConstantState? {
+    private fun applyRoundedBubble(bubbleView: View, isSelfSender: Boolean, color: Int) {
+        val context = bubbleView.context
+        if (cornerRadiusDp <= 0f) {
+            if (color != 0) {
+                bubbleView.background?.mutate()?.setTint(color)
+            }
+            return
+        }
+
+        val radiusPx = (cornerRadiusDp * context.resources.displayMetrics.density).toInt()
+        val baseColor = if (color != 0) color else defaultBubbleColor(context, isSelfSender)
+
+        val normal = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = radiusPx.toFloat()
+            setColor(baseColor)
+        }
+        val pressed = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = radiusPx.toFloat()
+            setColor(darken(baseColor))
+        }
+
+        val paddingLeft = bubbleView.paddingLeft
+        val paddingTop = bubbleView.paddingTop
+        val paddingRight = bubbleView.paddingRight
+        val paddingBottom = bubbleView.paddingBottom
+
+        bubbleView.apply {
+            background = StateListDrawable().apply {
+                addState(intArrayOf(android.R.attr.state_pressed), pressed)
+                addState(intArrayOf(android.R.attr.state_focused), pressed)
+                addState(intArrayOf(), normal)
+            }
+            setPadding(paddingLeft, paddingTop, paddingRight, paddingBottom)
+        }
+    }
+
+    private fun darken(color: Int): Int {
+        val fArr = FloatArray(3)
+        Color.colorToHSV(color, fArr)
+        fArr[2] *= 0.8f
+        return Color.HSVToColor(fArr)
+    }
+
+
         val file = KnownPaths.moduleAssets / fileName
         val stamp = runCatching {
             if (file.exists()) "${file.getLastModifiedTime().toMillis()}:${file.fileSize()}" else ABSENT_STAMP
@@ -633,6 +691,7 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         showComposeDialog(context) {
             var selectedSide by remember { mutableStateOf(BubbleSide.OTHER) }
             var pendingDeletion by remember { mutableStateOf<BubbleSide?>(null) }
+            var cornerInput by remember { mutableFloatStateOf(cornerRadiusDp) }
             var otherForm by remember {
                 mutableStateOf(
                     BubbleForm(
@@ -698,6 +757,18 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
                     title = { Text("自定义消息气泡") },
                     text = {
                         DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
+                            Text(
+                                text = "气泡圆角: ${cornerInput.roundToInt()}dp" +
+                                        if (cornerInput <= 0f) " (使用默认气泡)" else "",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Slider(
+                                value = cornerInput,
+                                onValueChange = { cornerInput = it },
+                                valueRange = cornerRadiusRange,
+                            )
+
                             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                                 BubbleSide.entries.forEachIndexed { index, side ->
                                     SegmentedButton(
@@ -741,6 +812,7 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
                                 bgThatDark = otherForm.backgroundDark
                                 bgThisLight = selfForm.backgroundLight
                                 bgThisDark = selfForm.backgroundDark
+                                cornerRadiusDp = cornerInput
                                 onDismiss()
                             },
                         ) {
