@@ -12,6 +12,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -494,7 +495,8 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                             },
                                             modifier = if (item.wechatIndex == 2) Modifier.onLongPress(openImproveSnsTimeline) else Modifier,
                                             icon = {
-                                                BadgedBox(
+                                                Box {
+                                                    BadgedBox(
                                                     badge = {
                                                         if (index == 0 && unreadCount > 0) {
                                                             Badge(containerColor = Color(0xFFFF3B30)) {
@@ -530,11 +532,22 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                                         tint = tint
                                                     )
                                                 }
+                                                if (isSelected && offset < 0.5f) {
+                                                    Box(
+                                                        Modifier
+                                                            .align(Alignment.BottomCenter)
+                                                            .width(24.dp)
+                                                            .height(2.dp)
+                                                            .background(tint)
+                                                    )
+                                                }
+                                                }
                                             },
                                             label = null,
                                             alwaysShowLabel = false,
+                                            indicator = {},
                                             colors = NavigationBarItemDefaults.colors(
-                                                indicatorColor = activeColor.copy(alpha = 0.15f),
+                                                indicatorColor = Color.Transparent,
                                                 selectedIconColor = activeColor,
                                                 unselectedIconColor = inactiveColor,
                                                 selectedTextColor = activeColor,
@@ -594,6 +607,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                         tabsCount = visibleTabItems.size,
                                         isBlurEnabled = useBackdrop,
                                         blurRadius = blurRadius.dp,
+                                        showLiquidPill = false,
                                         colors = FloatingBottomBarDefaults.colors(
                                             containerColor = backgroundColor,
                                             indicatorColor = activeColor,
@@ -605,6 +619,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                             val isSelected = index == settledIndex
 
                                             FloatingBottomBarItem(
+                                                selected = isSelected,
                                                 onClick = {
                                                     view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                                                     onTabClicked(index)
