@@ -56,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -63,7 +64,10 @@ import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -113,6 +117,7 @@ import dev.ujhhgtg.wekit.ui.utils.setLifecycleOwner
 import dev.ujhhgtg.wekit.ui.utils.showComposeDialog
 import dev.ujhhgtg.wekit.utils.reflection.bool
 import dev.ujhhgtg.wekit.utils.reflection.int
+import java.lang.reflect.Modifier
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -123,15 +128,17 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
         val wechatIndex: Int,
         val outlined: ImageVector,
         val filled: ImageVector,
-        val label: String
+        val label: String,
+        val wechatOutlinedRes: String,
+        val wechatFilledRes: String
     )
 
     @Stable
     private val TAB_ITEMS = listOf(
-        NavItem(0, MaterialSymbols.Outlined.Home, MaterialSymbols.OutlinedFilled.Home, "主页"),
-        NavItem(1, MaterialSymbols.Outlined.Contacts, MaterialSymbols.OutlinedFilled.Contacts, "通讯录"),
-        NavItem(2, MaterialSymbols.Outlined.Explore, MaterialSymbols.OutlinedFilled.Explore, "发现"),
-        NavItem(3, MaterialSymbols.Outlined.Person, MaterialSymbols.OutlinedFilled.Person, "我")
+        NavItem(0, MaterialSymbols.Outlined.Home, MaterialSymbols.OutlinedFilled.Home, "主页", "icons_outlined_chats", "icons_filled_chats_hl"),
+        NavItem(1, MaterialSymbols.Outlined.Contacts, MaterialSymbols.OutlinedFilled.Contacts, "通讯录", "icons_outlined_contacts", "icons_filled_contacts_hl"),
+        NavItem(2, MaterialSymbols.Outlined.Explore, MaterialSymbols.OutlinedFilled.Explore, "发现", "icons_outlined_discover", "icons_filled_discover_hl"),
+        NavItem(3, MaterialSymbols.Outlined.Person, MaterialSymbols.OutlinedFilled.Person, "我", "icons_outlined_me", "icons_filled_me_hl")
     )
 
     private var useFloating by prefOption("nav_bar_use_floating", true)
@@ -148,6 +155,9 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
     private var activeColorHex by prefOption("nav_bar_active_color_hex", "")
     private var inactiveColorHex by prefOption("nav_bar_inactive_color_hex", "")
 
+    // 使用微信默认图标 (运行时通过宿主 Resources 加载微信的 raw SVG 图标位图)
+    private var useWechatIcons by prefOption("nav_bar_use_wechat_icons", true)
+
     private fun parseColor(value: String): Int? =
         value.takeIf { it.isNotBlank() }?.let { runCatching { it.toColorInt() }.getOrNull() }
 
@@ -158,6 +168,11 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
     private const val MAX_BAR_SCALE = 150
     private const val BAR_SCALE_STEP = 5
     private const val BASE_BAR_HEIGHT_DP = 56
+
+    // WeChat's TabIconView decodes its tab icons at this density scale (f227406p),
+    // matching the stock tab bar's icon size.
+    private const val WECHAT_ICON_SCALE = 1.1666666f
+    private const val ICON_SIZE_DP = 24
 
     // Matches the double-tap threshold WeChat's own tab listener (f8/r8) uses.
     private const val DOUBLE_TAP_WINDOW_MS = 300L
@@ -196,6 +211,11 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
         val remapProgrammaticTab = ThreadLocal.withInitial { false }
         val allowLogicalTabCount = ThreadLocal.withInitial { false }
         val callbackPagerIndex = ThreadLocal<Int?>()
+
+        // Pre-decode WeChat's own tab icon bitmaps so the bar can paint them without
+        // touching WeChat's resource pipeline during composition. Filled lazily inside
+        // the doOnCreate hook below once an Activity (and WeChat's resource hook) exists.
+        val wechatIconCache = mutableStateMapOf<Int, ImageBitmap>()
 
         val tabsAdapterClass = "com.tencent.mm.ui.MainTabUI\$TabsAdapter".toClass()
         tabsAdapterClass.reflekt().apply {
@@ -312,6 +332,27 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
 
             val viewParent = viewPager.parent as ViewGroup
             val bottomTabViewGroup = viewParent.getChildAt(1) as ViewGroup
+
+            // Decode WeChat's own tab icon bitmaps through its BitmapUtil pipeline
+            // (the same call TabIconView.a() makes), so the replaced bar shows the
+            // stock WeChat icons. Falls back to the Material vectors if the resource
+            // or the method can't be resolved on this WeChat version.
+            if (useWechatIcons && wechatIconCache.isEmpty()) {
+                runCatching {
+                    visibleTabItems.forEach { item ->
+                        val id = activity.resources
+                            .getIdentifier(item.wechatFilledRes, "raw", "com.tencent.mm")
+                        if (id != 0) {
+                            val bitmap = methodDecodeWechatIcon.method.invoke(
+                                null, id, WECHAT_ICON_SCALE
+                            ) as? android.graphics.Bitmap
+                            if (bitmap != null) {
+                                wechatIconCache[item.wechatIndex] = bitmap.asImageBitmap()
+                            }
+                        }
+                    }
+                }
+            }
 
             // WeChat's original bottom tab (LauncherUIBottomTabView) is kept alive — we only
             // clear its children below — so its own OnClickListener (an `f8`/`r8` instance)
@@ -524,11 +565,23 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                                         }
                                                     }
                                                 ) {
-                                                    Icon(
-                                                        imageVector = item.outlined,
-                                                        contentDescription = item.label,
-                                                        tint = tint
-                                                    )
+                                                    val wechatIcon = wechatIconCache[item.wechatIndex]
+                                                    if (useWechatIcons && wechatIcon != null) {
+                                                        Icon(
+                                                            painter = remember(wechatIcon) {
+                                                                BitmapPainter(wechatIcon)
+                                                            },
+                                                            contentDescription = item.label,
+                                                            tint = tint,
+                                                            modifier = Modifier.size(ICON_SIZE_DP.dp)
+                                                        )
+                                                    } else {
+                                                        Icon(
+                                                            imageVector = item.outlined,
+                                                            contentDescription = item.label,
+                                                            tint = tint
+                                                        )
+                                                    }
                                                 }
                                             },
                                             label = null,
@@ -646,10 +699,21 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                                         }
                                                     }
                                                 ) {
-                                                    Icon(
-                                                        imageVector = item.outlined,
-                                                        contentDescription = item.label
-                                                    )
+                                                    val wechatIcon = wechatIconCache[item.wechatIndex]
+                                                    if (useWechatIcons && wechatIcon != null) {
+                                                        Icon(
+                                                            painter = remember(wechatIcon) {
+                                                                BitmapPainter(wechatIcon)
+                                                            },
+                                                            contentDescription = item.label,
+                                                            modifier = Modifier.size(ICON_SIZE_DP.dp)
+                                                        )
+                                                    } else {
+                                                        Icon(
+                                                            imageVector = item.outlined,
+                                                            contentDescription = item.label
+                                                        )
+                                                    }
                                                 }
                                                 if (!hideLabels) {
                                                     Text(
@@ -775,6 +839,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
     override fun onClick(context: ComponentActivity) {
         showComposeDialog(context) {
             var useFloatingInput by remember { mutableStateOf(useFloating) }
+            var useWechatIconsInput by remember { mutableStateOf(useWechatIcons) }
             var useBackdropInput by remember { mutableStateOf(useBackdrop) }
             var animatePageChangeInput by remember { mutableStateOf(animatePageChange) }
             var showFinderBadgeInput by remember { mutableStateOf(showFinderBadge) }
@@ -819,6 +884,15 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                     { useFloatingInput = it })
                             },
                             headlineContent = { Text("使用悬浮底栏") },
+                        )
+                        ListItem(
+                            trailingContent = {
+                                Switch(
+                                    useWechatIconsInput,
+                                    { useWechatIconsInput = it })
+                            },
+                            supportingContent = { Text("使用微信默认图标, 保持液态效果与颜色调试") },
+                            headlineContent = { Text("使用微信默认图标") },
                         )
                         ListItem(
                             trailingContent = {
@@ -890,6 +964,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                 confirmButton = {
                     Button(onClick = {
                         useFloating = useFloatingInput
+                        useWechatIcons = useWechatIconsInput
                         useBackdrop = useBackdropInput
                         animatePageChange = animatePageChangeInput
                         hideLabels = hideLabelsInput
@@ -1031,6 +1106,29 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
         matcher {
             declaredClass = "com.tencent.mm.ui.LauncherUIBottomTabView"
             usingEqStrings("[updateContactTabUnread] unread : ")
+        }
+    }
+
+    // WeChat's BitmapUtil.d0(int resId, float scale): static (int, float) -> Bitmap.
+    // WeChat itself calls this from TabIconView.a() to decode its raw SVG tab icons
+    // (the APK keeps those as res/raw/*.svg paths in resources.arsc but the actual
+    // files are served through WeChat's in-process resource hook), so going through
+    // it guarantees we decode exactly the same bitmaps WeChat renders.
+    // d0 itself is a one-liner delegating to f0(...) which delegates to e0(...),
+    // the method that actually references the "MicroMsg.BitmapUtil" log tag, so
+    // locate it by that call chain rather than by its own (absent) strings.
+    private val methodDecodeWechatIcon by dexMethod {
+        matcher {
+            modifiers(Modifier.STATIC)
+            paramTypes("int", "float")
+            returnType = "android.graphics.Bitmap"
+            addInvoke {
+                paramCount = 8
+                addInvoke {
+                    paramCount = 10
+                    usingEqStrings("MicroMsg.BitmapUtil")
+                }
+            }
         }
     }
 }
