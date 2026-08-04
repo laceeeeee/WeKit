@@ -117,7 +117,7 @@ import dev.ujhhgtg.wekit.ui.utils.setLifecycleOwner
 import dev.ujhhgtg.wekit.ui.utils.showComposeDialog
 import dev.ujhhgtg.wekit.utils.reflection.bool
 import dev.ujhhgtg.wekit.utils.reflection.int
-import java.lang.reflect.Modifier
+import java.lang.reflect.Modifier as JavaModifier
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -1119,7 +1119,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
     // locate it by that call chain rather than by its own (absent) strings.
     private val methodDecodeWechatIcon by dexMethod {
         matcher {
-            modifiers(Modifier.STATIC)
+            modifiers(JavaModifier.STATIC)
             paramTypes("int", "float")
             returnType = "android.graphics.Bitmap"
             addInvoke {
