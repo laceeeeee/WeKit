@@ -83,6 +83,7 @@ import androidx.compose.material3.LocalContentColor as M3LocalContentColor
 import androidx.compose.ui.graphics.shadow.Shadow as ComposeShadow
 
 val LocalFloatingBottomBarContentColor = staticCompositionLocalOf { Color.Unspecified }
+val LocalFloatingBottomBarActiveContentColor = staticCompositionLocalOf { Color.Unspecified }
 val LocalFloatingBottomBarTabScale = staticCompositionLocalOf { { 1f } }
 
 // State class holding all colors for the bottom bar
@@ -114,11 +115,17 @@ object FloatingBottomBarDefaults {
 fun RowScope.FloatingBottomBarItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    selected: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val scale = LocalFloatingBottomBarTabScale.current
     // Read the dynamic color provided by the surrounding layer.
     val contentColor = LocalFloatingBottomBarContentColor.current
+    // In line-indicator mode there is no active overlay layer, so the item itself
+    // picks the active color for the selected tab from this outer composition local.
+    val activeContentColor = LocalFloatingBottomBarActiveContentColor.current
+    val effectiveContentColor =
+        if (selected && activeContentColor != Color.Unspecified) activeContentColor else contentColor
 
     Column(
         modifier
@@ -139,7 +146,7 @@ fun RowScope.FloatingBottomBarItem(
         verticalArrangement = Arrangement.spacedBy(1.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        CompositionLocalProvider(M3LocalContentColor provides contentColor) {
+        CompositionLocalProvider(M3LocalContentColor provides effectiveContentColor) {
             content()
         }
     }
@@ -170,8 +177,15 @@ fun FloatingBottomBar(
     // *tap* still bulges and slides rather than teleporting.
     isTracking: (() -> Boolean)? = null,
     isBlurEnabled: Boolean = true,
-    // Radius of the glass blur, in dp. Higher = frostier / less legible content behind the bar.
+    // Radius of the glass blur, in dp. Larger = frostier / less legible content behind the bar.
     blurRadius: Dp = 8.dp,
+    // When false the liquid glass pill / translucent capsule is not drawn; a thin line
+    // matching [indicatorWidth] x [indicatorHeight] slides under the selected tab instead.
+    // In that mode the active-content overlay layer is skipped and each item colors itself
+    // from [FloatingBottomBarItem.selected].
+    showLiquidPill: Boolean = true,
+    indicatorWidth: Dp = 24.dp,
+    indicatorHeight: Dp = 2.dp,
     colors: FloatingBottomBarColors = FloatingBottomBarDefaults.colors(),
     content: @Composable RowScope.() -> Unit
 ) {
@@ -334,6 +348,9 @@ fun FloatingBottomBar(
         modifier = modifier.width(IntrinsicSize.Min),
         contentAlignment = Alignment.CenterStart
     ) {
+        CompositionLocalProvider(
+            LocalFloatingBottomBarActiveContentColor provides colors.activeContentColor
+        ) {
         // Base layer — unselected content.
         CompositionLocalProvider(LocalFloatingBottomBarContentColor provides colors.contentColor) {
             Row(
@@ -394,7 +411,9 @@ fun FloatingBottomBar(
         }
 
         // Active overlay — captured into tabsBackdrop and revealed through the sliding pill.
-        if (isBlurEnabled) {
+        // Skipped in line-indicator mode: the selected item colors itself from the outer
+        // activeContentColor instead, and the line indicator replaces the pill entirely.
+        if (isBlurEnabled && showLiquidPill) {
             CompositionLocalProvider(
                 LocalFloatingBottomBarTabScale provides {
                     lerp(1f, 1.2f, dampedDragAnimation.pressProgress)
@@ -434,7 +453,7 @@ fun FloatingBottomBar(
 
         if (tabWidthPx > 0f) {
             val tabWidthDp = with(density) { tabWidthPx.toDp() }
-            if (isBlurEnabled) {
+            if (showLiquidPill && isBlurEnabled) {
                 Box(
                     Modifier
                         .padding(horizontal = 4.dp)
@@ -487,7 +506,7 @@ fun FloatingBottomBar(
                         .height(56.dp)
                         .width(tabWidthDp)
                 )
-            } else {
+            } else if (showLiquidPill) {
                 Box(
                     modifier = Modifier
                         .padding(horizontal = 4.dp)
@@ -520,7 +539,32 @@ fun FloatingBottomBar(
                         )
                     }
                 }
+            } else {
+                // Line indicator: a thin bar as wide as the tab icon slides under the selected
+                // tab, keeping the damped spring so it still glides between tabs like the pill
+                // did. Height (56.dp) and bottom padding place it right below the 24.dp icon.
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 4.dp)
+                        .graphicsLayer {
+                            val progressOffset = dampedDragAnimation.value * tabWidthPx
+                            translationX = if (isLtr) progressOffset + panelOffset else -progressOffset + panelOffset
+                        }
+                        .then(dampedDragAnimation.modifier)
+                        .width(tabWidthDp)
+                        .height(56.dp)
+                        .padding(bottom = 20.dp),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    Box(
+                        Modifier
+                            .width(indicatorWidth)
+                            .height(indicatorHeight)
+                            .background(colors.indicatorColor)
+                    )
+                }
             }
         }
+    }
     }
 }
