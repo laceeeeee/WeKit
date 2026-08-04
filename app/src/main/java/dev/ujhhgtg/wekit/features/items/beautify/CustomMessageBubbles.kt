@@ -388,7 +388,7 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         return Color.HSVToColor(fArr)
     }
 
-
+    private fun bubbleConstantState(fileName: String, resources: Resources): Drawable.ConstantState? {
         val file = KnownPaths.moduleAssets / fileName
         val stamp = runCatching {
             if (file.exists()) "${file.getLastModifiedTime().toMillis()}:${file.fileSize()}" else ABSENT_STAMP
