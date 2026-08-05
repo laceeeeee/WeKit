@@ -9,7 +9,9 @@ package dev.ujhhgtg.wekit.ui.content
 import android.os.Build
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOut
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -127,6 +129,25 @@ fun RowScope.FloatingBottomBarItem(
     val effectiveContentColor =
         if (selected && activeContentColor != Color.Unspecified) activeContentColor else contentColor
 
+    // Bounce (回弹) the whole item when it becomes selected: squish down then spring
+    // back through 1.0 with overshoot so the tab pops. Fires only on the false -> true
+    // edge, so persistent recompositions don't re-trigger it.
+    val bounceScale = remember { Animatable(1f) }
+    var wasSelected by remember { mutableStateOf(selected) }
+    LaunchedEffect(selected) {
+        if (selected && !wasSelected) {
+            bounceScale.snapTo(0.9f)
+            bounceScale.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    stiffness = Spring.StiffnessMedium,
+                ),
+            )
+        }
+        wasSelected = selected
+    }
+
     Column(
         modifier
             .clip(CircleShape)
@@ -139,7 +160,7 @@ fun RowScope.FloatingBottomBarItem(
             .fillMaxHeight()
             .weight(1f)
             .graphicsLayer {
-                val s = scale()
+                val s = scale() * bounceScale.value
                 scaleX = s
                 scaleY = s
             },
