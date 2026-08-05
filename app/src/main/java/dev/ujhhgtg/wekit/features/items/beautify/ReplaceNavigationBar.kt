@@ -149,6 +149,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
     private var blurRadius by prefOption("nav_bar_blur_radius", 8)
     private var barScalePercent by prefOption("nav_bar_scale", 100)
     private var barHeightDp by prefOption("nav_bar_height_dp", BASE_BAR_HEIGHT_DP)
+    private var barLiftDp by prefOption("nav_bar_lift_dp", 0)
     private var tabOrder by prefOption("nav_bar_tab_order", TAB_ITEMS.joinToString(",") { it.wechatIndex.toString() })
     private var enabledTabs by prefOption("nav_bar_enabled_tabs", TAB_ITEMS.map { it.wechatIndex.toString() }.toSet())
 
@@ -175,6 +176,9 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
     private const val MIN_BAR_HEIGHT_DP = 32
     private const val MAX_BAR_HEIGHT_DP = 96
     private const val BAR_HEIGHT_STEP = 2
+    private const val MIN_BAR_LIFT_DP = 0
+    private const val MAX_BAR_LIFT_DP = 200
+    private const val BAR_LIFT_STEP = 4
 
     // WeChat's TabIconView decodes its tab icons at this density scale (f227406p),
     // matching the stock tab bar's icon size.
@@ -462,6 +466,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
             val hideLabels = hideLabels
             val blurRadius = blurRadius
             val barHeight = barHeightDp.coerceIn(MIN_BAR_HEIGHT_DP, MAX_BAR_HEIGHT_DP)
+            val barLift = barLiftDp.coerceIn(MIN_BAR_LIFT_DP, MAX_BAR_LIFT_DP)
             val barScale = barScalePercent.coerceIn(MIN_BAR_SCALE, MAX_BAR_SCALE) / 100f
 
             val composeView = ComposeView(activity).apply {
@@ -622,7 +627,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                             )
                                             .padding(
                                                 bottom = 12.dp + WindowInsets.navigationBars.asPaddingValues()
-                                                    .calculateBottomPadding()
+                                                    .calculateBottomPadding() + barLift.dp
                                             ),
                                         // Spring target: on a tap this is the tapped tab, so the
                                         // pill bulges and slides across. During a swipe the gate
@@ -861,6 +866,9 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
             var barHeightInput by remember {
                 mutableFloatStateOf(barHeightDp.coerceIn(MIN_BAR_HEIGHT_DP, MAX_BAR_HEIGHT_DP).toFloat())
             }
+            var barLiftInput by remember {
+                mutableFloatStateOf(barLiftDp.coerceIn(MIN_BAR_LIFT_DP, MAX_BAR_LIFT_DP).toFloat())
+            }
             var activeColorInput by remember { mutableStateOf(activeColorHex) }
             var inactiveColorInput by remember { mutableStateOf(inactiveColorHex) }
             var liquidColorInput by remember { mutableStateOf(liquidColorHex) }
@@ -977,6 +985,17 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                             headlineContent = { Text("底栏高度: ${barHeightInput.roundToInt()}dp") },
                         )
                         ListItem(
+                            supportingContent = {
+                                Slider(
+                                    value = barLiftInput,
+                                    onValueChange = { barLiftInput = it },
+                                    valueRange = MIN_BAR_LIFT_DP.toFloat()..MAX_BAR_LIFT_DP.toFloat(),
+                                    steps = (MAX_BAR_LIFT_DP - MIN_BAR_LIFT_DP) / BAR_LIFT_STEP - 1
+                                )
+                            },
+                            headlineContent = { Text("底栏抬高: ${barLiftInput.roundToInt()}dp") },
+                        )
+                        ListItem(
                             modifier = Modifier,
                             leadingContent = null,
                             trailingContent = {
@@ -1001,6 +1020,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                         blurRadius = blurRadiusInput.roundToInt()
                         barScalePercent = barScaleInput.roundToInt()
                         barHeightDp = barHeightInput.roundToInt()
+                        barLiftDp = barLiftInput.roundToInt()
                         activeColorHex = activeColorInput.trim()
                         inactiveColorHex = inactiveColorInput.trim()
                         liquidColorHex = liquidColorInput.trim()
