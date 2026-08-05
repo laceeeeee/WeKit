@@ -148,6 +148,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
     private var hideLabels by prefOption("nav_bar_hide_labels", false)
     private var blurRadius by prefOption("nav_bar_blur_radius", 8)
     private var barScalePercent by prefOption("nav_bar_scale", 100)
+    private var barHeightDp by prefOption("nav_bar_height_dp", BASE_BAR_HEIGHT_DP)
     private var tabOrder by prefOption("nav_bar_tab_order", TAB_ITEMS.joinToString(",") { it.wechatIndex.toString() })
     private var enabledTabs by prefOption("nav_bar_enabled_tabs", TAB_ITEMS.map { it.wechatIndex.toString() }.toSet())
 
@@ -171,6 +172,9 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
     private const val MAX_BAR_SCALE = 150
     private const val BAR_SCALE_STEP = 5
     private const val BASE_BAR_HEIGHT_DP = 56
+    private const val MIN_BAR_HEIGHT_DP = 32
+    private const val MAX_BAR_HEIGHT_DP = 96
+    private const val BAR_HEIGHT_STEP = 2
 
     // WeChat's TabIconView decodes its tab icons at this density scale (f227406p),
     // matching the stock tab bar's icon size.
@@ -457,6 +461,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
             val showFinderBadge = showFinderBadge
             val hideLabels = hideLabels
             val blurRadius = blurRadius
+            val barHeight = barHeightDp.coerceIn(MIN_BAR_HEIGHT_DP, MAX_BAR_HEIGHT_DP)
             val barScale = barScalePercent.coerceIn(MIN_BAR_SCALE, MAX_BAR_SCALE) / 100f
 
             val composeView = ComposeView(activity).apply {
@@ -508,7 +513,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                 NavigationBar(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(BASE_BAR_HEIGHT_DP.dp),
+                                        .height(barHeight.dp),
                                     containerColor = backgroundColor
                                 ) {
                                     visibleTabItems.forEachIndexed { index, item ->
@@ -651,6 +656,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                         tabsCount = visibleTabItems.size,
                                         isBlurEnabled = useBackdrop,
                                         blurRadius = blurRadius.dp,
+                                        height = barHeight.dp,
                                         showLiquidPill = false,
                                         showLineIndicator = false,
                                         colors = FloatingBottomBarDefaults.colors(
@@ -852,6 +858,9 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
             var barScaleInput by remember {
                 mutableFloatStateOf(barScalePercent.coerceIn(MIN_BAR_SCALE, MAX_BAR_SCALE).toFloat())
             }
+            var barHeightInput by remember {
+                mutableFloatStateOf(barHeightDp.coerceIn(MIN_BAR_HEIGHT_DP, MAX_BAR_HEIGHT_DP).toFloat())
+            }
             var activeColorInput by remember { mutableStateOf(activeColorHex) }
             var inactiveColorInput by remember { mutableStateOf(inactiveColorHex) }
             var liquidColorInput by remember { mutableStateOf(liquidColorHex) }
@@ -957,6 +966,17 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                             headlineContent = { Text("底栏缩放: ${barScaleInput.roundToInt()}%") },
                         )
                         ListItem(
+                            supportingContent = {
+                                Slider(
+                                    value = barHeightInput,
+                                    onValueChange = { barHeightInput = it },
+                                    valueRange = MIN_BAR_HEIGHT_DP.toFloat()..MAX_BAR_HEIGHT_DP.toFloat(),
+                                    steps = (MAX_BAR_HEIGHT_DP - MIN_BAR_HEIGHT_DP) / BAR_HEIGHT_STEP - 1
+                                )
+                            },
+                            headlineContent = { Text("底栏高度: ${barHeightInput.roundToInt()}dp") },
+                        )
+                        ListItem(
                             modifier = Modifier,
                             leadingContent = null,
                             trailingContent = {
@@ -980,6 +1000,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                         showFinderBadge = showFinderBadgeInput
                         blurRadius = blurRadiusInput.roundToInt()
                         barScalePercent = barScaleInput.roundToInt()
+                        barHeightDp = barHeightInput.roundToInt()
                         activeColorHex = activeColorInput.trim()
                         inactiveColorHex = inactiveColorInput.trim()
                         liquidColorHex = liquidColorInput.trim()
