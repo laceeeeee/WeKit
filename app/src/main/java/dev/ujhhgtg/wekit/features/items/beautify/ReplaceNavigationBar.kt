@@ -155,6 +155,9 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
     private var activeColorHex by prefOption("nav_bar_active_color_hex", "")
     private var inactiveColorHex by prefOption("nav_bar_inactive_color_hex", "")
 
+    // 液态玻璃效果颜色, 留空表示跟随主题底色
+    private var liquidColorHex by prefOption("nav_bar_liquid_color_hex", "")
+
     // 使用微信默认图标 (运行时通过宿主 Resources 加载微信的 raw SVG 图标位图)
     private var useWechatIcons by prefOption("nav_bar_use_wechat_icons", true)
 
@@ -483,6 +486,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                         val contactUnreadCount by contactUnreadCountState
 
                         val backgroundColor = if (isSystemInDarkTheme()) Color(0xFF191919) else Color(0xFFF7F7F7)
+                        val liquidColor = parseColor(liquidColorHex)?.let(::Color) ?: backgroundColor
                         val activeColor = parseColor(activeColorHex)?.let(::Color)
                             ?: MaterialTheme.colorScheme.primary
                         val inactiveColor = parseColor(inactiveColorHex)?.let(::Color)
@@ -650,7 +654,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                         showLiquidPill = false,
                                         showLineIndicator = false,
                                         colors = FloatingBottomBarDefaults.colors(
-                                            containerColor = backgroundColor,
+                                            containerColor = liquidColor,
                                             indicatorColor = activeColor,
                                             contentColor = inactiveColor,
                                             activeContentColor = activeColor
@@ -850,6 +854,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
             }
             var activeColorInput by remember { mutableStateOf(activeColorHex) }
             var inactiveColorInput by remember { mutableStateOf(inactiveColorHex) }
+            var liquidColorInput by remember { mutableStateOf(liquidColorHex) }
 
             AlertDialogContent(
                 title = { Text("美化首页底部导航栏") },
@@ -936,6 +941,10 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                             label = "未选中图标颜色 (留空 = 默认)",
                             value = inactiveColorInput,
                             onValueChange = { inactiveColorInput = it })
+                        WeColorField(
+                            label = "液态玻璃效果颜色 (留空 = 跟随主题底色)",
+                            value = liquidColorInput,
+                            onValueChange = { liquidColorInput = it })
                         ListItem(
                             supportingContent = {
                                 Slider(
@@ -973,6 +982,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                         barScalePercent = barScaleInput.roundToInt()
                         activeColorHex = activeColorInput.trim()
                         inactiveColorHex = inactiveColorInput.trim()
+                        liquidColorHex = liquidColorInput.trim()
                         onDismiss()
                     }) { Text("确定") }
                 }
