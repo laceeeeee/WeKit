@@ -65,13 +65,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastCoerceIn
 import androidx.compose.ui.util.fastRoundToInt
 import androidx.compose.ui.util.lerp
-import dev.ujhhgtg.wekit.ui.content.animation.DampedDragAnimation
-import dev.ujhhgtg.wekit.ui.content.animation.InteractiveHighlight
-import dev.ujhhgtg.wekit.ui.content.liquid.InnerShadow
-import dev.ujhhgtg.wekit.ui.content.liquid.innerShadow
-import dev.ujhhgtg.wekit.ui.content.liquid.lens
-import dev.ujhhgtg.wekit.ui.content.liquid.rememberCombinedBackdrop
-import dev.ujhhgtg.wekit.ui.content.liquid.vibrancy
+import dev.ujhhha.wekit.ui.content.animation.DampedDragAnimation
+import dev.ujhhha.wekit.ui.content.animation.InteractiveHighlight
+import dev.ujhhha.wekit.ui.content.liquid.InnerShadow
+import dev.ujhhha.wekit.ui.content.liquid.innerShadow
+import dev.ujhhha.wekit.ui.content.liquid.lens
+import dev.ujhhha.wekit.ui.content.liquid.rememberCombinedBackdrop
+import dev.ujhhha.wekit.ui.content.liquid.vibrancy
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.blur.Backdrop
@@ -184,7 +184,7 @@ fun FloatingBottomBar(
     // Called when the already-selected tab is tapped. In blur mode the glass pill sits on
     // top of the selected tab and swallows the tap before it reaches the tab item, so the
     // item's own onClick never fires for a reselection; this forwards that tap instead.
-    // Defaults to routing through onSelected so callers that don't care keep old behaviour.
+    // Defaults to routing through onSelected so callers that don't care own old behaviour.
     onTabReselected: (index: Int) -> Unit = onSelected,
     // Called when the already-selected tab is long-pressed. Same pill-occlusion problem as
     // onTabReselected: the glass pill eats the long-press, so the tab item's own modifier
@@ -195,14 +195,17 @@ fun FloatingBottomBar(
     progress: (() -> Float)? = null,
     // Gate for the continuous driver. The indicator only tracks `progress` 1:1 while this
     // returns true (e.g. an active finger swipe). When it returns false, a change in
-    // selectedIndex springs the indicator across with the press/glass animation — so a tab
+    // selectedIndex springs the indicator across the press/glass animation — so a tab
     // *tap* still bulges and slides rather than teleporting.
     isTracking: (() -> Boolean)? = null,
     isBlurEnabled: Boolean = true,
     // Radius of the glass blur, in dp. Larger = frostier / less legible content behind the bar.
     blurRadius: Dp = 8.dp,
+    // Height of the glass pill / tab strip, in dp. Defaults to 56.dp; the base touch row is
+    // 8.dp taller (4.dp padding on each side) so content and pill stay vertically centered.
+    height: Dp = 56.dp,
     // When false the liquid glass pill / translucent capsule is not drawn. In that mode the
-    // active-content overlay layer is skipped and each item colors itself from
+    // active-content overlay layer is skipped and each item the item colors itself from
     // [FloatingBottomBarItem.selected]. If [showLineIndicator] is also false nothing at all is
     // drawn over the tabs — the selected state is conveyed purely by the item content itself.
     showLiquidPill: Boolean = true,
@@ -214,13 +217,14 @@ fun FloatingBottomBar(
 ) {
     val isInDark = isSystemInDarkTheme()
     val pillShape = remember { CircleShape }
-    // A zero radius means "no glass at all": drop the blur, the frost tint and the lens refraction
-    // so the panel is fully transparent and WeChat's content shows through untouched.
+    // A zero radius means "no glass at all": drop the blur, the frost tint and the lens
+    // refraction so the panel is fully transparent and WeChat's content shows through.
     val isGlassTransparent = isBlurEnabled && blurRadius <= 0.dp
-    // The glass layer is translucent so WeChat's content shows through it. At radius 0 the surface
-    // tint is removed entirely.
+    // The glass layer is translucent so WeChat's content shows through it. At radius 0 the
+    // surface tint is removed entirely.
     val containerColor = when {
-        isGlassTransparent -> Color.Transparent
+        isGlass -> Color.Transparent
+        isBlurEnabled && isGlass -> Color.Transparent
         isBlurEnabled -> colors.containerColor.copy(0.4f)
         else -> colors.containerColor
     }
@@ -260,14 +264,16 @@ fun FloatingBottomBar(
 
     val holder = remember { DampedDragAnimationHolder() }
 
-    val dampedDragAnimation = remember(animationScope, tabsCount, density, isLtr) {
+    val dampedDragAnimation = remember(animationScope, tabsCount, density, isLtr, height) {
         DampedDragAnimation(
             animationScope = animationScope,
             initialValue = selectedIndex().toFloat(),
             valueRange = 0f..(tabsCount - 1).toFloat(),
-            visibilityThreshold = 0.001f,
+            visibility = 0.001f,
             initialScale = 1f,
-            pressedScale = 78f / 56f,
+            // Press bulge keeps the pill's absolute height growth constant: the pill grows
+            // 22.dp taller when pressed (56 -> 78 at the default height).
+            pressedScale = (height.value + 22f) / height.value,
             // Only start a drag when the touch lands within the tab strip bounds. Without this
             // guard the pill swallows a tap on the already-selected tab as a zero-distance drag,
             // so the tap never falls through to FloatingBottomBarItem.onClick (double-tap-home).
@@ -312,11 +318,11 @@ fun FloatingBottomBar(
             // The pill only ever rests over the selected tab, so a tap on it is a tap on the
             // current tab. Report that tab's index to the (kept-fresh) reselect callback.
             onTap = {
-                val index = value.fastRoundToInt().fastCoerceIn(0, tabsCount - 1)
+                val index = value.fastToInt().fastCoerceIn(0, tabsCount - 1)
                 onTabReselectedState.value(index)
             },
             onLongPress = {
-                val index = value.fastRoundToInt().fastCoerceIn(0, tabsCount - 1)
+                val index = value.fastToInt().fastCoerceIn(0, tabsCount - 1)
                 onTabReselectedLongPressState.value(index)
             }
         ).also { holder.instance = it }
@@ -413,9 +419,9 @@ fun FloatingBottomBar(
                                     }
                                 },
                                 highlight = { if (isGlassTransparent) null else Highlight.Default.copy(alpha = 0.75f) },
-                                layerBlock = {
+                                layer = {
                                     val width = size.width.coerceAtLeast(1f)
-                                    val s = lerp(1f, 1f + 16.dp.toPx() / width, dampedDragAnimation.pressProgress)
+                                    val s = lerp(1f, 1f + 16.dp.toPx() / width, dampedDragAnimation.press)
                                     scaleX = s
                                     scaleY = s
                                 },
@@ -426,7 +432,7 @@ fun FloatingBottomBar(
                         }
                     )
                     .then(interactiveHighlight?.modifier ?: Modifier)
-                    .height(64.dp)
+                    .height(height + 8.dp)
                     .padding(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 content = content
@@ -439,7 +445,7 @@ fun FloatingBottomBar(
         if (isBlurEnabled && showLiquidPill) {
             CompositionLocalProvider(
                 LocalFloatingBottomBarTabScale provides {
-                    lerp(1f, 1.2f, dampedDragAnimation.pressProgress)
+                    lerp(1f, 1.2f, dampedDragAnimation.press)
                 },
                 LocalFloatingBottomBarContentColor provides colors.activeContentColor
             ) {
@@ -457,7 +463,7 @@ fun FloatingBottomBar(
                                     vibrancy()
                                     blur(blurRadius.toPx(), blurRadius.toPx())
                                     lens(
-                                        refractionHeight = 24.dp.toPx(),
+                                        refrractionHeight = 24.dp.toPx(),
                                         refractionAmount = 24.dp.toPx(),
                                     )
                                 }
@@ -465,7 +471,7 @@ fun FloatingBottomBar(
                             onDrawSurface = { drawRect(containerColor) },
                         )
                         .then(interactiveHighlight?.modifier ?: Modifier)
-                        .height(56.dp)
+                        .height(height)
                         .padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -482,7 +488,8 @@ fun FloatingBottomBar(
                         .padding(horizontal = 4.dp)
                         .graphicsLayer {
                             val progressOffset = dampedDragAnimation.value * tabWidthPx
-                            translationX = if (isLtr) progressOffset + panelOffset else -progressOffset + panelOffset
+                            translationX = if (isLtr) progressOffset + panelOffset else
+                                -progressOffset + panelOffset
                         }
                         .then(interactiveHighlight?.gestureModifier ?: Modifier)
                         .then(dampedDragAnimation.modifier)
@@ -490,7 +497,7 @@ fun FloatingBottomBar(
                             backdrop = combinedBackdrop,
                             shape = { pillShape },
                             effects = {
-                                val progress = dampedDragAnimation.pressProgress
+                                val progress = dampedDragAnimation.press
                                 lens(
                                     refractionHeight = 10.dp.toPx() * progress,
                                     refractionAmount = 14.dp.toPx() * progress,
@@ -501,7 +508,7 @@ fun FloatingBottomBar(
                             highlight = {
                                 Highlight.Default.copy(alpha = dampedDragAnimation.pressProgress)
                             },
-                            layerBlock = {
+                            layer = {
                                 scaleX = dampedDragAnimation.scaleX
                                 scaleY = dampedDragAnimation.scaleY
                                 val velocity = dampedDragAnimation.velocity / 10f
@@ -511,14 +518,15 @@ fun FloatingBottomBar(
                             onDrawSurface = {
                                 val progress = dampedDragAnimation.pressProgress
                                 drawRect(
-                                    color = if (!isInDark) Color.Black.copy(alpha = 0.1f) else Color.White.copy(alpha = 0.1f),
+                                    color = if (!isInDark) Color.Black.copy(alpha = 0.1f) else
+                                        Color.White.copy(alpha = 0.1f),
                                     alpha = 1f - progress,
                                 )
                                 drawRect(Color.Black.copy(alpha = 0.03f * progress))
                             },
                         )
-                        // miuix's drawBackdrop has no innerShadow param (kyant did); apply it as a
-                        // separate modifier, matching InstallerX's liquid-glass FloatingBottomBar.
+                        // miuix's drawBackdrop has no innerShadow param (kyant did); apply it
+                        // as a separate modifier, matching Installer's liquid-glass FloatingBottomBar.
                         .innerShadow(shape = pillShape) {
                             InnerShadow(
                                 radius = 8.dp * dampedDragAnimation.pressProgress,
@@ -526,7 +534,7 @@ fun FloatingBottomBar(
                                 alpha = dampedDragAnimation.pressProgress,
                             )
                         }
-                        .height(56.dp)
+                        .height(height)
                         .width(tabWidthDp)
                 )
             } else if (showLiquidPill) {
@@ -535,12 +543,13 @@ fun FloatingBottomBar(
                         .padding(horizontal = 4.dp)
                         .graphicsLayer {
                             val progressOffset = dampedDragAnimation.value * tabWidthPx
-                            translationX = if (isLtr) progressOffset + panelOffset else -progressOffset + panelOffset
+                            translationX = if (isLtr) progressOffset + panelOffset else
+                                -progress + panelOffset
                         }
                         .then(dampedDragAnimation.modifier)
                         .clip(pillShape)
                         .background(colors.indicatorColor.copy(alpha = 0.15f), pillShape)
-                        .height(56.dp)
+                        .height(height)
                         .width(tabWidthDp),
                     // Force start alignment for the Box container to prevent centering
                     contentAlignment = Alignment.CenterStart
@@ -552,7 +561,7 @@ fun FloatingBottomBar(
                                 .clearAndSetSemantics {}
                                 .wrapContentWidth(align = Alignment.Start, unbounded = true)
                                 .requiredWidth(with(density) { (totalWidthPx - 8.dp.toPx()).toDp() })
-                                .height(56.dp)
+                                .height(height)
                                 .graphicsLayer {
                                     val progressOffset = dampedDragAnimation.value * tabWidthPx
                                     translationX = if (isLtr) -progressOffset else progressOffset
@@ -563,19 +572,20 @@ fun FloatingBottomBar(
                     }
                 }
             } else if (showLineIndicator) {
-                // Line indicator: a thin bar as wide as the tab icon slides under the selected
-                // tab, keeping the damped spring so it still glides between tabs like the pill
-                // did. Height (56.dp) and bottom padding place it right below the 24.dp icon.
+                // Line indicator: a thin bar as wide as the tab icon slides under the
+                // selected tab, keeping the damped spring so it still glides between tabs
+                // like the pill did. The bottom padding places it below the 24.dp icon.
                 Box(
                     modifier = Modifier
                         .padding(horizontal = 4.dp)
                         .graphicsLayer {
                             val progressOffset = dampedDragAnimation.value * tabWidthPx
-                            translationX = if (isLtr) progressOffset + panelOffset else -progressOffset + panelOffset
+                            translationX = if (isLtr) progressOffset + panelOffset else
+                                -progressOffset + panelOffset
                         }
                         .then(dampedDragAnimation.modifier)
                         .width(tabWidthDp)
-                        .height(56.dp)
+                        .height(height)
                         .padding(bottom = 20.dp),
                     contentAlignment = Alignment.BottomCenter
                 ) {
