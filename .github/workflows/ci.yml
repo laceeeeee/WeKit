@@ -101,17 +101,27 @@ jobs:
 
       - name: Decode keystore
         if: github.event_name != 'pull_request'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > $RUNNER_TEMP/wekit-keystore.jks
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > $RUNNER_TEMP/wekit-keystore.jks
+            echo "WEKIT_KEYSTORE_FILE=$RUNNER_TEMP/wekit-keystore.jks" >> "$GITHUB_ENV"
+            echo "WEKIT_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "WEKIT_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "WEKIT_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+            echo "::notice::Using repository keystore for signing"
+          else
+            echo "::notice::No keystore secrets configured; falling back to debug signing"
+          fi
 
-      - name: Build Release (Signed)
+      - name: Build Release
         if: github.event_name != 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WEKIT_KEYSTORE_FILE: ${{ runner.temp }}/wekit-keystore.jks
-          WEKIT_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          WEKIT_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          WEKIT_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --warning-mode all --stacktrace
 
       - name: Build Release (Unsigned)
