@@ -9,6 +9,7 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
 import android.graphics.Rect
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.NinePatchDrawable
 import android.graphics.drawable.StateListDrawable
 import android.view.View
@@ -24,10 +25,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -39,6 +42,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.get
 import androidx.core.graphics.toColorInt
@@ -52,7 +56,6 @@ import dev.ujhhgtg.wekit.features.api.core.models.MessageType
 import dev.ujhhgtg.wekit.features.api.ui.WeChatMessageViewApi
 import dev.ujhhgtg.wekit.features.core.ClickableFeature
 import dev.ujhhgtg.wekit.features.core.Feature
-import dev.ujhhgtg.wekit.features.items.beautify.CustomMessageBubbles.ICON_TINT_TAG
 import dev.ujhhgtg.wekit.features.items.beautify.CustomMessageBubbles.bubbleCache
 import dev.ujhhgtg.wekit.preferences.WePrefs.Companion.prefOption
 import dev.ujhhgtg.wekit.ui.content.AlertDialogContent
@@ -80,7 +83,7 @@ import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 import kotlin.io.path.getLastModifiedTime
 
-@Feature(name = "自定义消息气泡", categories = ["界面美化", "聊天"], description = "自定义聊天中的消息气泡图片和颜色")
+@Feature(name = "自定义消息气泡", categories = ["界面美化", "聊天"], description = "自定义聊天中的消息气泡图片、颜色和圆角")
 object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateViewListener {
 
     private const val TAG = "CustomMessageBubbles"
@@ -92,6 +95,15 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
     private const val LEFT_BUBBLE_FILE = "left_bubble.9.png"   // 对方
     private const val RIGHT_BUBBLE_FILE = "right_bubble.9.png" // 自己
 
+    // Corner radius (dp) used for corners left blank while custom bubble radius is enabled.
+    private const val DEFAULT_RADIUS_DP = 8
+
+    // 启用自定义圆角但未设置背景色时, 兜底使用微信默认气泡色 (主题相关)。
+    private const val DEFAULT_BUBBLE_COLOR_SELF_LIGHT = 0xFF95EC69.toInt()
+    private const val DEFAULT_BUBBLE_COLOR_SELF_DARK = 0xFF3A8C3C.toInt()
+    private const val DEFAULT_BUBBLE_COLOR_OTHER_LIGHT = 0xFFFFFFFF.toInt()
+    private const val DEFAULT_BUBBLE_COLOR_OTHER_DARK = 0xFF232323.toInt()
+
     private enum class BubbleSide(val title: String, val fileName: String) {
         OTHER("对方消息", LEFT_BUBBLE_FILE),
         SELF("自己消息", RIGHT_BUBBLE_FILE),
@@ -102,11 +114,19 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         val foregroundDark: String,
         val backgroundLight: String,
         val backgroundDark: String,
+        val radiusTl: String,
+        val radiusTr: String,
+        val radiusBl: String,
+        val radiusBr: String,
         val imageExists: Boolean,
     ) {
         val hasValidColors: Boolean
             get() = listOf(foregroundLight, foregroundDark, backgroundLight, backgroundDark)
                 .all { it.isBlank() || runCatching { it.toColorInt() }.isSuccess }
+
+        val hasValidRadii: Boolean
+            get() = listOf(radiusTl, radiusTr, radiusBl, radiusBr)
+                .all { it.isBlank() || parseRadius(it) != null }
     }
 
     // View tag holding the icon tint color (Int) for an AnimImageView. WeChat swaps in the play
@@ -152,6 +172,15 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
     private var bgThatDark by prefOption("custom_bubbles_bg_that_dark", "#00000000")
     private var bgThisLight by prefOption("custom_bubbles_bg_this_light", "#00000000")
     private var bgThisDark by prefOption("custom_bubbles_bg_this_dark", "#00000000")
+
+    private var radiusTlThat by prefOption("custom_bubbles_radius_tl_that", "")
+    private var radiusTrThat by prefOption("custom_bubbles_radius_tr_that", "")
+    private var radiusBlThat by prefOption("custom_bubbles_radius_bl_that", "")
+    private var radiusBrThat by prefOption("custom_bubbles_radius_br_that", "")
+    private var radiusTlThis by prefOption("custom_bubbles_radius_tl_this", "")
+    private var radiusTrThis by prefOption("custom_bubbles_radius_tr_this", "")
+    private var radiusBlThis by prefOption("custom_bubbles_radius_bl_this", "")
+    private var radiusBrThis by prefOption("custom_bubbles_radius_br_this", "")
 
     // A nine-patch source must keep at least one interior pixel once the marker border is stripped.
     private const val MIN_BUBBLE_SIZE_PX = 3
@@ -274,6 +303,13 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         }
     }
 
+    /**
+     * Applies the user-configured bubble appearance. Priority:
+     *   1. imported 9-patch image (with current background color tint),
+     *   2. custom corner radii (a four-corner [GradientDrawable] tinted with the background color,
+     *      falling back to the stock WeChat bubble color per theme),
+     *   3. a plain tint over the stock bubble drawable.
+     */
     private fun applyBubble(bubbleView: View, isSelfSender: Boolean) {
         val context = bubbleView.context
 
@@ -288,42 +324,108 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         val resources = bubbleView.resources
         val constantState = bubbleConstantState(fileName, resources)
 
-        if (constantState == null) {
-            if (color != 0) {
-                bubbleView.background?.mutate()?.setTint(color)
+        if (constantState != null) {
+            // The cached state is untinted; each bind gets its own mutated copies so the per-message
+            // background color (and the light/dark variant) never leaks into the shared state.
+            val normalDrawable = constantState.newDrawable(resources).mutate().apply {
+                if (color != 0) setTint(color)
+            }
+            val pressedDrawable = constantState.newDrawable(resources).mutate().apply {
+                val fArr = FloatArray(3).apply {
+                    Color.colorToHSV(if (color != 0) color else -1, this)
+                    this[2] *= 0.8f
+                }
+                setTint(Color.HSVToColor(fArr))
+            }
+
+            installBubbleBackground(bubbleView) {
+                bubbleView.background = StateListDrawable().apply {
+                    addState(intArrayOf(android.R.attr.state_pressed), pressedDrawable)
+                    addState(intArrayOf(android.R.attr.state_focused), pressedDrawable)
+                    addState(intArrayOf(), normalDrawable)
+                }
             }
             return
         }
 
+        val radii = cornerRadiiPx(isSelfSender, resources.displayMetrics.density)
+        if (radii != null) {
+            val fill = if (color != 0) color else defaultBubbleColor(isSelfSender, context.isDarkMode)
+            installBubbleBackground(bubbleView) {
+                bubbleView.background = roundedStateList(fill, radii)
+            }
+        } else if (color != 0) {
+            bubbleView.background?.mutate()?.setTint(color)
+        }
+    }
+
+    /**
+     * Runs [apply] against the view's background, restoring the view's padding afterwards. The
+     * stock bubble is a nine-patch whose content padding lives inside the drawable; replacing it
+     * with a plain [GradientDrawable] (which carries no intrinsic padding) would otherwise pull the
+     * content flush to the bubble edge.
+     */
+    private inline fun installBubbleBackground(bubbleView: View, crossinline apply: () -> Unit) {
         val paddingLeft = bubbleView.paddingLeft
         val paddingTop = bubbleView.paddingTop
         val paddingRight = bubbleView.paddingRight
         val paddingBottom = bubbleView.paddingBottom
+        apply()
+        bubbleView.setPadding(paddingLeft, paddingTop, paddingRight, paddingBottom)
+    }
 
-        // The cached state is untinted; each bind gets its own mutated copies so the per-message
-        // background color (and the light/dark variant) never leaks into the shared state.
-        val normalDrawable = constantState.newDrawable(resources).mutate().apply {
-            if (color != 0) setTint(color)
+    private fun roundedStateList(fillColor: Int, cornerRadii: FloatArray): Drawable {
+        fun rounded(alphaScale: Float): GradientDrawable = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            this.cornerRadii = cornerRadii
+            setColor(darken(fillColor, alphaScale))
         }
-        val pressedDrawable = constantState.newDrawable(resources).mutate().apply {
-            val fArr = FloatArray(3).apply {
-                Color.colorToHSV(if (color != 0) color else -1, this)
-                this[2] *= 0.8f
-            }
-            setTint(Color.HSVToColor(fArr))
-        }
-
-        val stateListDrawable = StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_pressed), pressedDrawable)
-            addState(intArrayOf(android.R.attr.state_focused), pressedDrawable)
-            addState(intArrayOf(), normalDrawable)
-        }
-
-        bubbleView.apply {
-            background = stateListDrawable
-            setPadding(paddingLeft, paddingTop, paddingRight, paddingBottom)
+        return StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), rounded(0.8f))
+            addState(intArrayOf(android.R.attr.state_focused), rounded(0.8f))
+            addState(intArrayOf(), rounded(1f))
         }
     }
+
+    /** Scales a color's HSV brightness (keeps alpha). */
+    private fun darken(color: Int, factor: Float): Int {
+        val hsv = FloatArray(3)
+        Color.colorToHSV(color, hsv)
+        hsv[2] *= factor
+        return Color.HSVToColor(Color.alpha(color), hsv)
+    }
+
+    private fun defaultBubbleColor(isSelfSender: Boolean, dark: Boolean): Int = when {
+        isSelfSender && dark -> DEFAULT_BUBBLE_COLOR_SELF_DARK
+        isSelfSender -> DEFAULT_BUBBLE_COLOR_SELF_LIGHT
+        dark -> DEFAULT_BUBBLE_COLOR_OTHER_DARK
+        else -> DEFAULT_BUBBLE_COLOR_OTHER_LIGHT
+    }
+
+    /**
+     * Resolves the four requested corner radii (dp) into an 8-slot [GradientDrawable.cornerRadii]
+     * array (pixels), or null when every corner is left blank — meaning "keep the stock bubble".
+     * Corners left blank while others are customized fall back to the stock WeChat radius.
+     */
+    private fun cornerRadiiPx(isSelfSender: Boolean, density: Float): FloatArray? {
+        val tl = if (isSelfSender) radiusTlThis else radiusTlThat
+        val tr = if (isSelfSender) radiusTrThis else radiusTrThat
+        val bl = if (isSelfSender) radiusBlThis else radiusBlThat
+        val br = if (isSelfSender) radiusBrThis else radiusBrThat
+        val corners = listOf(parseRadius(tl), parseRadius(tr), parseRadius(bl), parseRadius(br))
+        if (corners.all { it == null }) return null
+
+        val px = { dp: Int -> dp * density }
+        return floatArrayOf(
+            px(corners[0] ?: DEFAULT_RADIUS_DP), px(corners[0] ?: DEFAULT_RADIUS_DP),
+            px(corners[1] ?: DEFAULT_RADIUS_DP), px(corners[1] ?: DEFAULT_RADIUS_DP),
+            px(corners[3] ?: DEFAULT_RADIUS_DP), px(corners[3] ?: DEFAULT_RADIUS_DP),
+            px(corners[2] ?: DEFAULT_RADIUS_DP), px(corners[2] ?: DEFAULT_RADIUS_DP),
+        )
+    }
+
+    private fun parseRadius(raw: String): Int? =
+        raw.trim().takeIf { it.isNotEmpty() }?.toIntOrNull()?.takeIf { it >= 0 }
 
     /**
      * Returns the cached nine-patch state for [fileName], decoding it at most once per file
@@ -586,6 +688,51 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         }
 
         Text(
+            text = "圆角 (dp, 留空 = 不自定义)",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            RadiusField(
+                label = "左上",
+                value = form.radiusTl,
+                onValueChange = { onFormChange(form.copy(radiusTl = it)) },
+                modifier = Modifier.weight(1f),
+            )
+            RadiusField(
+                label = "右上",
+                value = form.radiusTr,
+                onValueChange = { onFormChange(form.copy(radiusTr = it)) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            RadiusField(
+                label = "左下",
+                value = form.radiusBl,
+                onValueChange = { onFormChange(form.copy(radiusBl = it)) },
+                modifier = Modifier.weight(1f),
+            )
+            RadiusField(
+                label = "右下",
+                value = form.radiusBr,
+                onValueChange = { onFormChange(form.copy(radiusBr = it)) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Text(
+            text = "自定义圆角后气泡背景将由纯色绘制; 背景色留空时使用微信默认气泡色。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Text(
             text = "气泡图片 (.9.png)",
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
@@ -629,6 +776,29 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         }
     }
 
+    @Composable
+    private fun RadiusField(
+        label: String,
+        value: String,
+        onValueChange: (String) -> Unit,
+        modifier: Modifier = Modifier,
+    ) {
+        val invalid = value.isNotEmpty() && parseRadius(value) == null
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = modifier,
+            label = { Text(label) },
+            singleLine = true,
+            isError = invalid,
+            suffix = { Text("dp") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            supportingText = if (invalid) {
+                { Text("请输入 0-99 或留空") }
+            } else null,
+        )
+    }
+
     override fun onClick(context: ComponentActivity) {
         showComposeDialog(context) {
             var selectedSide by remember { mutableStateOf(BubbleSide.OTHER) }
@@ -640,6 +810,10 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
                         foregroundDark = thatDark,
                         backgroundLight = bgThatLight,
                         backgroundDark = bgThatDark,
+                        radiusTl = radiusTlThat,
+                        radiusTr = radiusTrThat,
+                        radiusBl = radiusBlThat,
+                        radiusBr = radiusBrThat,
                         imageExists = (KnownPaths.moduleAssets / LEFT_BUBBLE_FILE).exists(),
                     )
                 )
@@ -651,6 +825,10 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
                         foregroundDark = thisDark,
                         backgroundLight = bgThisLight,
                         backgroundDark = bgThisDark,
+                        radiusTl = radiusTlThis,
+                        radiusTr = radiusTrThis,
+                        radiusBl = radiusBlThis,
+                        radiusBr = radiusBrThis,
                         imageExists = (KnownPaths.moduleAssets / RIGHT_BUBBLE_FILE).exists(),
                     )
                 )
@@ -730,7 +908,8 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
                     dismissButton = { TextButton(onDismiss) { Text("取消") } },
                     confirmButton = {
                         Button(
-                            enabled = otherForm.hasValidColors && selfForm.hasValidColors,
+                            enabled = otherForm.hasValidColors && selfForm.hasValidColors &&
+                                    otherForm.hasValidRadii && selfForm.hasValidRadii,
                             onClick = {
                                 thatLight = otherForm.foregroundLight
                                 thatDark = otherForm.foregroundDark
@@ -741,6 +920,15 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
                                 bgThatDark = otherForm.backgroundDark
                                 bgThisLight = selfForm.backgroundLight
                                 bgThisDark = selfForm.backgroundDark
+
+                                radiusTlThat = otherForm.radiusTl
+                                radiusTrThat = otherForm.radiusTr
+                                radiusBlThat = otherForm.radiusBl
+                                radiusBrThat = otherForm.radiusBr
+                                radiusTlThis = selfForm.radiusTl
+                                radiusTrThis = selfForm.radiusTr
+                                radiusBlThis = selfForm.radiusBl
+                                radiusBrThis = selfForm.radiusBr
                                 onDismiss()
                             },
                         ) {
