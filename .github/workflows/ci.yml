@@ -163,59 +163,8 @@ jobs:
           name: wekit-mapping
           path: dist/mapping/*.txt
 
-  build_zygisk:
-    needs: build
-    runs-on: ubuntu-latest
-    if: ${{ needs.build.result == 'success' }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: 21
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          targets: aarch64-linux-android,armv7-linux-androideabi
-
-      - name: Install Android NDK
-        run: |
-          NDK_VERSION=$(sed -n 's/^ndk = "\(.*\)"/\1/p' gradle/libs.versions.toml)
-          MIN_SDK=$(sed -n 's/^minSdk = "\(.*\)"/\1/p' gradle/libs.versions.toml)
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION"
-          NDK_BIN="$ANDROID_HOME/ndk/$NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          test -x "$NDK_BIN/aarch64-linux-android$MIN_SDK-clang"
-          test -x "$NDK_BIN/armv7a-linux-androideabi$MIN_SDK-clang"
-          test -x "$NDK_BIN/llvm-strip"
-
-      - name: Download Release APK artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: wekit-apk
-          path: artifacts
-
-      - name: Build Zygisk module
-        run: |
-          ./x zygisk build --apk-release --release --skip-apk-build \
-            --apk artifacts/app-standard-release.apk
-
-      - name: Upload Zygisk module
-        uses: actions/upload-artifact@v7
-        with:
-          name: wekit-zygisk
-          path: wekit-zygisk/release/*.zip
-          if-no-files-found: error
-
   release-ci:
-    needs: [build, build_zygisk]
+    needs: build
     runs-on: ubuntu-latest
     if: ${{ always() && needs.build.result == 'success' && github.ref == 'refs/heads/master' }}
     permissions:
@@ -234,13 +183,6 @@ jobs:
           name: wekit-apk
           path: artifacts
 
-      - name: Download Zygisk artifact
-        if: ${{ needs.build_zygisk.result == 'success' }}
-        uses: actions/download-artifact@v8
-        with:
-          name: wekit-zygisk
-          path: artifacts
-
       - name: Delete existing CI release (if exists)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -248,30 +190,14 @@ jobs:
           gh release delete CI --yes || true
           gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/CI || true
 
-      - name: Generate update.json
-        run: |
-          COMMIT_COUNT=$(git rev-list --count HEAD)
-          GIT_HASH=$(git rev-parse --short HEAD)
-
-          cat > artifacts/update.json <<EOF
-          {
-            "versionCode": ${COMMIT_COUNT},
-            "versionName": "git+${GIT_HASH}",
-            "commit": "${GIT_HASH}"
-          }
-          EOF
-
-          echo "Generated update.json:"
-          cat artifacts/update.json
-
-      - name: Create CI release and upload artifacts
+      - name: Create CI release and upload APKs
         uses: softprops/action-gh-release@v3
         with:
           tag_name: CI
           name: CI
           body: |
-            本 Release 始终包含最新的 CI 构建产物, 便于未登录 GitHub 的用户下载模块或模块内置更新器更新
-            
+            本 Release 始终包含最新的 CI 构建 APK 产物, 便于未登录 GitHub 的用户下载模块
+
             提交 SHA: `${{ github.sha }}`
 
             提交消息:
@@ -279,13 +205,13 @@ jobs:
             ${{ github.event.head_commit.message || '手动构建' }}
             ```
           files: |
-            artifacts/*
+            artifacts/*.apk
           prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   upload-telegram:
-    needs: [build, build_zygisk]
+    needs: build
     runs-on: ubuntu-latest
     if: ${{ always() && needs.build.result == 'success' && github.ref == 'refs/heads/master' }}
     services:
@@ -303,13 +229,6 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: wekit-apk
-          path: artifacts
-
-      - name: Download Zygisk artifact
-        if: ${{ needs.build_zygisk.result == 'success' }}
-        uses: actions/download-artifact@v8
-        with:
-          name: wekit-zygisk
           path: artifacts
 
       - name: Wait for Telegram API
@@ -337,12 +256,12 @@ jobs:
           [查看详情](https://github.com/${REPO}/commit/${SHA})"
           
           shopt -s nullglob
-          artifacts=(artifacts/*.apk artifacts/*.zip)
+          artifacts=(artifacts/*.apk)
           
           echo "${artifacts[@]}"
           
           if [ ${#artifacts[@]} -eq 0 ]; then
-            echo "No build artifacts found"
+            echo "No APK artifacts found"
             exit 1
           elif [ ${#artifacts[@]} -eq 1 ]; then
             # Single APK — use sendDocument (supports caption)
