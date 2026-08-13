@@ -25,15 +25,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -42,8 +41,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import androidx.core.graphics.get
 import androidx.core.graphics.toColorInt
 import com.composables.icons.materialsymbols.MaterialSymbols
@@ -95,8 +95,9 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
     private const val LEFT_BUBBLE_FILE = "left_bubble.9.png"   // 对方
     private const val RIGHT_BUBBLE_FILE = "right_bubble.9.png" // 自己
 
-    // Corner radius (dp) used for corners left blank while custom bubble radius is enabled.
-    private const val DEFAULT_RADIUS_DP = 8
+    // Corner radius (dp) applied to every corner of both sides when custom radius is enabled.
+    private const val DEFAULT_RADIUS_DP = 0
+    private const val MAX_RADIUS_DP = 32
 
     // 启用自定义圆角但未设置背景色时, 兜底使用微信默认气泡色 (主题相关)。
     private const val DEFAULT_BUBBLE_COLOR_SELF_LIGHT = 0xFF95EC69.toInt()
@@ -114,19 +115,11 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         val foregroundDark: String,
         val backgroundLight: String,
         val backgroundDark: String,
-        val radiusTl: String,
-        val radiusTr: String,
-        val radiusBl: String,
-        val radiusBr: String,
         val imageExists: Boolean,
     ) {
         val hasValidColors: Boolean
             get() = listOf(foregroundLight, foregroundDark, backgroundLight, backgroundDark)
                 .all { it.isBlank() || runCatching { it.toColorInt() }.isSuccess }
-
-        val hasValidRadii: Boolean
-            get() = listOf(radiusTl, radiusTr, radiusBl, radiusBr)
-                .all { it.isBlank() || parseRadius(it) != null }
     }
 
     // View tag holding the icon tint color (Int) for an AnimImageView. WeChat swaps in the play
@@ -173,14 +166,8 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
     private var bgThisLight by prefOption("custom_bubbles_bg_this_light", "#00000000")
     private var bgThisDark by prefOption("custom_bubbles_bg_this_dark", "#00000000")
 
-    private var radiusTlThat by prefOption("custom_bubbles_radius_tl_that", "")
-    private var radiusTrThat by prefOption("custom_bubbles_radius_tr_that", "")
-    private var radiusBlThat by prefOption("custom_bubbles_radius_bl_that", "")
-    private var radiusBrThat by prefOption("custom_bubbles_radius_br_that", "")
-    private var radiusTlThis by prefOption("custom_bubbles_radius_tl_this", "")
-    private var radiusTrThis by prefOption("custom_bubbles_radius_tr_this", "")
-    private var radiusBlThis by prefOption("custom_bubbles_radius_bl_this", "")
-    private var radiusBrThis by prefOption("custom_bubbles_radius_br_this", "")
+    // 统一圆角 (dp), 0 或留空 = 不自定义; 对对方/自己消息同时生效。
+    private var bubbleRadius by prefOption("custom_bubbles_radius", "")
 
     // A nine-patch source must keep at least one interior pixel once the marker border is stripped.
     private const val MIN_BUBBLE_SIZE_PX = 3
@@ -306,7 +293,7 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
     /**
      * Applies the user-configured bubble appearance. Priority:
      *   1. imported 9-patch image (with current background color tint),
-     *   2. custom corner radii (a four-corner [GradientDrawable] tinted with the background color,
+     *   2. custom corner radius (a [GradientDrawable] tinted with the background color,
      *      falling back to the stock WeChat bubble color per theme),
      *   3. a plain tint over the stock bubble drawable.
      */
@@ -348,7 +335,7 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
             return
         }
 
-        val radii = cornerRadiiPx(isSelfSender, resources.displayMetrics.density)
+        val radii = cornerRadiiPx(resources.displayMetrics.density)
         if (radii != null) {
             val fill = if (color != 0) color else defaultBubbleColor(isSelfSender, context.isDarkMode)
             installBubbleBackground(bubbleView) {
@@ -403,25 +390,16 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
     }
 
     /**
-     * Resolves the four requested corner radii (dp) into an 8-slot [GradientDrawable.cornerRadii]
-     * array (pixels), or null when every corner is left blank — meaning "keep the stock bubble".
-     * Corners left blank while others are customized fall back to the stock WeChat radius.
+     * Resolves the requested corner radius (dp, shared by both sides) into an 8-slot
+     * [GradientDrawable.cornerRadii] array (pixels), or null when radius is 0/blank —
+     * meaning "keep the stock bubble".
      */
-    private fun cornerRadiiPx(isSelfSender: Boolean, density: Float): FloatArray? {
-        val tl = if (isSelfSender) radiusTlThis else radiusTlThat
-        val tr = if (isSelfSender) radiusTrThis else radiusTrThat
-        val bl = if (isSelfSender) radiusBlThis else radiusBlThat
-        val br = if (isSelfSender) radiusBrThis else radiusBrThat
-        val corners = listOf(parseRadius(tl), parseRadius(tr), parseRadius(bl), parseRadius(br))
-        if (corners.all { it == null }) return null
+    private fun cornerRadiiPx(density: Float): FloatArray? {
+        val radius = parseRadius(bubbleRadius) ?: return null
+        if (radius <= 0) return null
 
-        val px = { dp: Int -> dp * density }
-        return floatArrayOf(
-            px(corners[0] ?: DEFAULT_RADIUS_DP), px(corners[0] ?: DEFAULT_RADIUS_DP),
-            px(corners[1] ?: DEFAULT_RADIUS_DP), px(corners[1] ?: DEFAULT_RADIUS_DP),
-            px(corners[3] ?: DEFAULT_RADIUS_DP), px(corners[3] ?: DEFAULT_RADIUS_DP),
-            px(corners[2] ?: DEFAULT_RADIUS_DP), px(corners[2] ?: DEFAULT_RADIUS_DP),
-        )
+        val px = radius * density
+        return floatArrayOf(px, px, px, px, px, px, px, px)
     }
 
     private fun parseRadius(raw: String): Int? =
@@ -688,51 +666,6 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         }
 
         Text(
-            text = "圆角 (dp, 留空 = 不自定义)",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            RadiusField(
-                label = "左上",
-                value = form.radiusTl,
-                onValueChange = { onFormChange(form.copy(radiusTl = it)) },
-                modifier = Modifier.weight(1f),
-            )
-            RadiusField(
-                label = "右上",
-                value = form.radiusTr,
-                onValueChange = { onFormChange(form.copy(radiusTr = it)) },
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            RadiusField(
-                label = "左下",
-                value = form.radiusBl,
-                onValueChange = { onFormChange(form.copy(radiusBl = it)) },
-                modifier = Modifier.weight(1f),
-            )
-            RadiusField(
-                label = "右下",
-                value = form.radiusBr,
-                onValueChange = { onFormChange(form.copy(radiusBr = it)) },
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Text(
-            text = "自定义圆角后气泡背景将由纯色绘制; 背景色留空时使用微信默认气泡色。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        Text(
             text = "气泡图片 (.9.png)",
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
@@ -776,33 +709,11 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
         }
     }
 
-    @Composable
-    private fun RadiusField(
-        label: String,
-        value: String,
-        onValueChange: (String) -> Unit,
-        modifier: Modifier = Modifier,
-    ) {
-        val invalid = value.isNotEmpty() && parseRadius(value) == null
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            modifier = modifier,
-            label = { Text(label) },
-            singleLine = true,
-            isError = invalid,
-            suffix = { Text("dp") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            supportingText = if (invalid) {
-                { Text("请输入 0-99 或留空") }
-            } else null,
-        )
-    }
-
     override fun onClick(context: ComponentActivity) {
         showComposeDialog(context) {
             var selectedSide by remember { mutableStateOf(BubbleSide.OTHER) }
             var pendingDeletion by remember { mutableStateOf<BubbleSide?>(null) }
+            var radiusDp by remember { mutableStateOf(parseRadius(bubbleRadius) ?: DEFAULT_RADIUS_DP) }
             var otherForm by remember {
                 mutableStateOf(
                     BubbleForm(
@@ -810,10 +721,6 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
                         foregroundDark = thatDark,
                         backgroundLight = bgThatLight,
                         backgroundDark = bgThatDark,
-                        radiusTl = radiusTlThat,
-                        radiusTr = radiusTrThat,
-                        radiusBl = radiusBlThat,
-                        radiusBr = radiusBrThat,
                         imageExists = (KnownPaths.moduleAssets / LEFT_BUBBLE_FILE).exists(),
                     )
                 )
@@ -825,10 +732,6 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
                         foregroundDark = thisDark,
                         backgroundLight = bgThisLight,
                         backgroundDark = bgThisDark,
-                        radiusTl = radiusTlThis,
-                        radiusTr = radiusTrThis,
-                        radiusBl = radiusBlThis,
-                        radiusBr = radiusBrThis,
                         imageExists = (KnownPaths.moduleAssets / RIGHT_BUBBLE_FILE).exists(),
                     )
                 )
@@ -876,6 +779,36 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
                     title = { Text("自定义消息气泡") },
                     text = {
                         DefaultColumn(Modifier.verticalScroll(rememberScrollState())) {
+                            Text(
+                                text = "圆角 (dp)",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Slider(
+                                    value = radiusDp.toFloat(),
+                                    onValueChange = { radiusDp = it.roundToInt() },
+                                    valueRange = DEFAULT_RADIUS_DP.toFloat()..MAX_RADIUS_DP.toFloat(),
+                                    steps = MAX_RADIUS_DP - DEFAULT_RADIUS_DP - 1,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    text = if (radiusDp == 0) "默认" else "$radiusDp dp",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.End,
+                                    modifier = Modifier.width(56.dp),
+                                )
+                            }
+                            Text(
+                                text = "0 = 不自定义圆角 (保持微信默认气泡)。自定义圆角后气泡背景将由纯色绘制, 背景色留空时使用微信默认气泡色, 对方/自己消息同时生效。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+
                             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                                 BubbleSide.entries.forEachIndexed { index, side ->
                                     SegmentedButton(
@@ -908,8 +841,7 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
                     dismissButton = { TextButton(onDismiss) { Text("取消") } },
                     confirmButton = {
                         Button(
-                            enabled = otherForm.hasValidColors && selfForm.hasValidColors &&
-                                    otherForm.hasValidRadii && selfForm.hasValidRadii,
+                            enabled = otherForm.hasValidColors && selfForm.hasValidColors,
                             onClick = {
                                 thatLight = otherForm.foregroundLight
                                 thatDark = otherForm.foregroundDark
@@ -921,14 +853,7 @@ object CustomMessageBubbles : ClickableFeature(), WeChatMessageViewApi.ICreateVi
                                 bgThisLight = selfForm.backgroundLight
                                 bgThisDark = selfForm.backgroundDark
 
-                                radiusTlThat = otherForm.radiusTl
-                                radiusTrThat = otherForm.radiusTr
-                                radiusBlThat = otherForm.radiusBl
-                                radiusBrThat = otherForm.radiusBr
-                                radiusTlThis = selfForm.radiusTl
-                                radiusTrThis = selfForm.radiusTr
-                                radiusBlThis = selfForm.radiusBl
-                                radiusBrThis = selfForm.radiusBr
+                                bubbleRadius = radiusDp.toString()
                                 onDismiss()
                             },
                         ) {
