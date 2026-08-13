@@ -76,6 +76,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.core.graphics.toColorInt
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.outlined.Contacts
 import com.composables.icons.materialsymbols.outlined.Drag_handle
@@ -104,6 +105,7 @@ import dev.ujhhgtg.wekit.ui.content.FloatingBottomBar
 import dev.ujhhgtg.wekit.ui.content.FloatingBottomBarDefaults
 import dev.ujhhgtg.wekit.ui.content.FloatingBottomBarItem
 import dev.ujhhgtg.wekit.ui.content.TextButton
+import dev.ujhhgtg.wekit.ui.content.WeColorField
 import dev.ujhhgtg.wekit.ui.content.rememberViewBackdrop
 import dev.ujhhgtg.wekit.ui.utils.InjectedUiTheme
 import dev.ujhhgtg.wekit.ui.utils.LifecycleOwnerProvider
@@ -141,6 +143,11 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
     private var barScalePercent by prefOption("nav_bar_scale", 100)
     private var tabOrder by prefOption("nav_bar_tab_order", TAB_ITEMS.joinToString(",") { it.wechatIndex.toString() })
     private var enabledTabs by prefOption("nav_bar_enabled_tabs", TAB_ITEMS.map { it.wechatIndex.toString() }.toSet())
+    private var barHeightDp by prefOption("nav_bar_height", BASE_BAR_HEIGHT_DP)
+    private var barWidthPercent by prefOption("nav_bar_width", 100)
+    private var colorBackground by prefOption("nav_bar_color_background", null as String?)
+    private var colorActive by prefOption("nav_bar_color_active", null as String?)
+    private var colorInactive by prefOption("nav_bar_color_inactive", null as String?)
 
     private const val MIN_BLUR_RADIUS = 0
     private const val MAX_BLUR_RADIUS = 40
@@ -149,6 +156,14 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
     private const val MAX_BAR_SCALE = 150
     private const val BAR_SCALE_STEP = 5
     private const val BASE_BAR_HEIGHT_DP = 56
+
+    private const val MIN_BAR_HEIGHT_DP = 40
+    private const val MAX_BAR_HEIGHT_DP = 96
+    private const val BAR_HEIGHT_STEP = 2
+
+    private const val MIN_BAR_WIDTH_PERCENT = 50
+    private const val MAX_BAR_WIDTH_PERCENT = 100
+    private const val BAR_WIDTH_STEP = 5
 
     // Matches the double-tap threshold WeChat's own tab listener (f8/r8) uses.
     private const val DOUBLE_TAP_WINDOW_MS = 300L
@@ -341,13 +356,6 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
             val initialPagerIndex = viewPager.currentItem
             val selectedPageIndexState = mutableIntStateOf(initialPagerIndex)
             val scrollOffsetState = mutableFloatStateOf(0f)
-            // Settled page index: only advances once the pager comes to rest on a page
-            // (positionOffset == 0). The floating bar highlights from this so the tab
-            // change happens *after* the content stops in both directions. The raw
-            // `position` above flips to the target the instant a backward swipe starts,
-            // which would move the pill early; the NavigationBar branch still needs that
-            // raw value for its scroll-driven color cross-fade.
-            val settledPageIndexState = mutableIntStateOf(initialPagerIndex)
             // Target page as soon as it's decided: immediately on a tab tap, and at the
             // half-way crossing during a finger swipe. Drives the discrete spring so a tap
             // still bulges + slides the pill instead of teleporting.
@@ -367,9 +375,6 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
 
                     selectedPageIndexState.intValue = position
                     scrollOffsetState.floatValue = positionOffset
-                    if (positionOffset == 0f) {
-                        settledPageIndexState.intValue = position
-                    }
                 }
 
             tabsAdapter.reflekt()
@@ -405,6 +410,11 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
             val hideLabels = hideLabels
             val blurRadius = blurRadius
             val barScale = barScalePercent.coerceIn(MIN_BAR_SCALE, MAX_BAR_SCALE) / 100f
+            val barHeight = barHeightDp.coerceIn(MIN_BAR_HEIGHT_DP, MAX_BAR_HEIGHT_DP)
+            val barWidthFraction = barWidthPercent.coerceIn(MIN_BAR_WIDTH_PERCENT, MAX_BAR_WIDTH_PERCENT) / 100f
+            val customContainerHex = colorBackground
+            val customActiveHex = colorActive
+            val customInactiveHex = colorInactive
 
             val composeView = ComposeView(activity).apply {
                 setLifecycleOwner(lifecycleOwner)
@@ -425,16 +435,25 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                         }
 
                         var selectedIndex by selectedPageIndexState
-                        val settledIndex by settledPageIndexState
                         val targetIndex by targetPageIndexState
                         val unreadCount by unreadCountState
                         val finderUnreadCount by finderUnreadCountState
                         val showFinderDot by showFinderDotState
                         val contactUnreadCount by contactUnreadCountState
 
-                        val backgroundColor = if (isSystemInDarkTheme()) Color(0xFF191919) else Color(0xFFF7F7F7)
-                        val activeColor = MaterialTheme.colorScheme.primary
-                        val inactiveColor = if (isSystemInDarkTheme()) Color(0xFF999999) else Color(0xFF181818)
+                        fun parseCustomColor(hex: String?): Color? =
+                            hex?.takeIf { it.isNotBlank() }
+                                ?.let { runCatching { it.toColorInt() }.getOrNull() }
+                                ?.let { Color(it) }
+
+                        val backgroundColor = parseCustomColor(customContainerHex)
+                            ?: if (isSystemInDarkTheme()) Color(0xFF191919) else Color(0xFFF7F7F7)
+                        val activeColor = parseCustomColor(customActiveHex)
+                            ?: MaterialTheme.colorScheme.primary
+                        val inactiveColor = parseCustomColor(customInactiveHex)
+                            ?: if (isSystemInDarkTheme()) Color(0xFF999999) else Color(0xFF181818)
+                        // Height fraction drives icon/label sizing so a taller bar doesn't look sparse.
+                        val heightFraction = barHeight / BASE_BAR_HEIGHT_DP.toFloat()
 
                         // Scale the bar by overriding the density rather than wrapping it in a
                         // graphicsLayer: every dp/sp inside (height, icons, pill, blur radius,
@@ -452,7 +471,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                 NavigationBar(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(BASE_BAR_HEIGHT_DP.dp),
+                                        .height(barHeight.dp),
                                     containerColor = backgroundColor
                                 ) {
                                     visibleTabItems.forEachIndexed { index, item ->
@@ -591,6 +610,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                         tabsCount = visibleTabItems.size,
                                         isBlurEnabled = useBackdrop,
                                         blurRadius = blurRadius.dp,
+                                        height = barHeight.dp,
                                         colors = FloatingBottomBarDefaults.colors(
                                             containerColor = backgroundColor,
                                             indicatorColor = activeColor,
@@ -599,7 +619,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                         )
                                     ) {
                                         visibleTabItems.forEachIndexed { index, item ->
-                                            val isSelected = index == settledIndex
+                                            val isSelected = index == targetIndex
 
                                             FloatingBottomBarItem(
                                                 onClick = {
@@ -608,7 +628,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                                 },
                                                 modifier = Modifier
                                                     .then(if (item.wechatIndex == 2) Modifier.onLongPress(openImproveSnsTimeline) else Modifier)
-                                                    .defaultMinSize(minWidth = 76.dp)
+                                                    .defaultMinSize(minWidth = 76.dp * barWidthFraction)
                                             ) {
                                                 BadgedBox(
                                                     badge = {
@@ -647,15 +667,16 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                                     ) { selected ->
                                                         Icon(
                                                             imageVector = if (selected) item.filled else item.outlined,
-                                                            contentDescription = item.label
+                                                            contentDescription = item.label,
+                                                            modifier = Modifier.size(24.dp * heightFraction)
                                                         )
                                                     }
                                                 }
                                                 if (!hideLabels) {
                                                     Text(
                                                         text = item.label,
-                                                        fontSize = 11.sp,
-                                                        lineHeight = 14.sp,
+                                                        fontSize = 11.sp * heightFraction,
+                                                        lineHeight = 14.sp * heightFraction,
                                                         maxLines = 1,
                                                         softWrap = false,
                                                         overflow = TextOverflow.Visible
@@ -783,6 +804,15 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
             var barScaleInput by remember {
                 mutableFloatStateOf(barScalePercent.coerceIn(MIN_BAR_SCALE, MAX_BAR_SCALE).toFloat())
             }
+            var barHeightInput by remember {
+                mutableFloatStateOf(barHeightDp.coerceIn(MIN_BAR_HEIGHT_DP, MAX_BAR_HEIGHT_DP).toFloat())
+            }
+            var barWidthInput by remember {
+                mutableFloatStateOf(barWidthPercent.coerceIn(MIN_BAR_WIDTH_PERCENT, MAX_BAR_WIDTH_PERCENT).toFloat())
+            }
+            var colorBackgroundInput by remember { mutableStateOf(colorBackground ?: "") }
+            var colorActiveInput by remember { mutableStateOf(colorActive ?: "") }
+            var colorInactiveInput by remember { mutableStateOf(colorInactive ?: "") }
 
             AlertDialogContent(
                 title = { Text("美化首页底部导航栏") },
@@ -864,6 +894,46 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                             headlineContent = { Text("底栏缩放: ${barScaleInput.roundToInt()}%") },
                         )
                         ListItem(
+                            supportingContent = {
+                                Slider(
+                                    value = barHeightInput,
+                                    onValueChange = { barHeightInput = it },
+                                    valueRange = MIN_BAR_HEIGHT_DP.toFloat()..MAX_BAR_HEIGHT_DP.toFloat(),
+                                    steps = (MAX_BAR_HEIGHT_DP - MIN_BAR_HEIGHT_DP) / BAR_HEIGHT_STEP - 1
+                                )
+                            },
+                            headlineContent = { Text("底栏高度: ${barHeightInput.roundToInt()} dp") },
+                        )
+                        ListItem(
+                            supportingContent = {
+                                Slider(
+                                    value = barWidthInput,
+                                    onValueChange = { barWidthInput = it },
+                                    valueRange = MIN_BAR_WIDTH_PERCENT.toFloat()..MAX_BAR_WIDTH_PERCENT.toFloat(),
+                                    steps = (MAX_BAR_WIDTH_PERCENT - MIN_BAR_WIDTH_PERCENT) / BAR_WIDTH_STEP - 1
+                                )
+                            },
+                            headlineContent = { Text("底栏宽度: ${barWidthInput.roundToInt()}%") },
+                        )
+                        WeColorField(
+                            label = "栏底色 (留空跟随系统)",
+                            value = colorBackgroundInput,
+                            onValueChange = { colorBackgroundInput = it.takeIf(String::isNotBlank) ?: "" },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        WeColorField(
+                            label = "选中图标色 (留空跟随系统)",
+                            value = colorActiveInput,
+                            onValueChange = { colorActiveInput = it.takeIf(String::isNotBlank) ?: "" },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        WeColorField(
+                            label = "未选中图标色 (留空跟随系统)",
+                            value = colorInactiveInput,
+                            onValueChange = { colorInactiveInput = it.takeIf(String::isNotBlank) ?: "" },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        ListItem(
                             modifier = Modifier,
                             leadingContent = null,
                             trailingContent = {
@@ -886,6 +956,11 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                         showFinderBadge = showFinderBadgeInput
                         blurRadius = blurRadiusInput.roundToInt()
                         barScalePercent = barScaleInput.roundToInt()
+                        barHeightDp = barHeightInput.roundToInt()
+                        barWidthPercent = barWidthInput.roundToInt()
+                        colorBackground = colorBackgroundInput.takeIf(String::isNotBlank)
+                        colorActive = colorActiveInput.takeIf(String::isNotBlank)
+                        colorInactive = colorInactiveInput.takeIf(String::isNotBlank)
                         onDismiss()
                     }) { Text("确定") }
                 }

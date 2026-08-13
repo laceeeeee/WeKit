@@ -172,6 +172,9 @@ fun FloatingBottomBar(
     isBlurEnabled: Boolean = true,
     // Radius of the glass blur, in dp. Higher = frostier / less legible content behind the bar.
     blurRadius: Dp = 8.dp,
+    // Height of the glass pill / active strip, in dp. The shell (content row + drop shadow)
+    // wraps it with 4.dp of breathing room on each side.
+    height: Dp = 56.dp,
     colors: FloatingBottomBarColors = FloatingBottomBarDefaults.colors(),
     content: @Composable RowScope.() -> Unit
 ) {
@@ -386,7 +389,7 @@ fun FloatingBottomBar(
                         }
                     )
                     .then(interactiveHighlight?.modifier ?: Modifier)
-                    .height(64.dp)
+                    .height(height + 8.dp)
                     .padding(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 content = content
@@ -423,7 +426,7 @@ fun FloatingBottomBar(
                             onDrawSurface = { drawRect(containerColor) },
                         )
                         .then(interactiveHighlight?.modifier ?: Modifier)
-                        .height(56.dp)
+                        .height(height)
                         .padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -484,7 +487,7 @@ fun FloatingBottomBar(
                                 alpha = dampedDragAnimation.pressProgress,
                             )
                         }
-                        .height(56.dp)
+                        .height(height)
                         .width(tabWidthDp)
                 )
             } else {
@@ -498,7 +501,7 @@ fun FloatingBottomBar(
                         .then(dampedDragAnimation.modifier)
                         .clip(pillShape)
                         .background(colors.indicatorColor.copy(alpha = 0.15f), pillShape)
-                        .height(56.dp)
+                        .height(height)
                         .width(tabWidthDp),
                     // Force start alignment for the Box container to prevent centering
                     contentAlignment = Alignment.CenterStart
@@ -510,7 +513,7 @@ fun FloatingBottomBar(
                                 .clearAndSetSemantics {}
                                 .wrapContentWidth(align = Alignment.Start, unbounded = true)
                                 .requiredWidth(with(density) { (totalWidthPx - 8.dp.toPx()).toDp() })
-                                .height(56.dp)
+                                .height(height)
                                 .graphicsLayer {
                                     val progressOffset = dampedDragAnimation.value * tabWidthPx
                                     translationX = if (isLtr) -progressOffset else progressOffset
