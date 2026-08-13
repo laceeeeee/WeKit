@@ -1,39 +1,47 @@
 package dev.ujhhgtg.wekit.features.items.chat
 
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.view.View
+import dev.ujhhgtg.wekit.utils.android.isDarkMode
 import java.util.WeakHashMap
+import kotlin.math.roundToInt
 
 /**
- * 悬浮卡公共绘制: 圆角 + 阴影 + 暗色浮层, 悬浮标题栏 / 悬浮输入框共用。
+ * Shared visual treatment for floating chat cards.
  *
- * 暗色 (深色外观) 下浮层仍是深色, 卡片会融进深色背景里看不清边界, 这里补一层
- * 半透明白色描边 + 半透明白色填充, 让卡片在深色背景下也能显出轮廓。
- * 深浅色切换时恢复原背景重画, 只影响当前已应用过的 View。
+ * Light mode keeps WeChat's own backgrounds intact. Dark mode needs an explicit surface and a
+ * hairline border because Android elevation is barely visible on near-black chat backgrounds.
  */
 internal object FloatingChatCardVisuals {
 
-    private const val DARK_SURFACE_COLOR = 0x33FFFFFF
-    private const val DARK_STROKE_COLOR = 0x4DFFFFFF
+    private const val DARK_SURFACE_COLOR = 0xFF242424.toInt()
+    private const val DARK_STROKE_COLOR = 0x24FFFFFF
+    private const val DARK_STROKE_WIDTH_DP = 1
 
-    private val originalBackgrounds = WeakHashMap<View, Any?>()
-    private val appliedBackgrounds = WeakHashMap<View, GradientDrawable>()
-    private val appliedStyles = WeakHashMap<View, Pair<Int, Boolean>>()
+    private data class AppliedStyle(val cornerRadiusDp: Int, val strokeWidthPx: Int)
 
-    /**
-     * 深浅色主题切换时按目标色深补色: 深色补白描边/填充, 浅色恢复原背景, 保持新旧主题一致。
-     */
+    private val originalBackgrounds = WeakHashMap<View, Drawable?>()
+    private val appliedBackgrounds = WeakHashMap<View, Drawable>()
+    private val appliedStyles = WeakHashMap<View, AppliedStyle>()
+
     fun applyDarkSurface(view: View, cornerRadiusDp: Int) {
-        val dark = isDarkMode(view)
-        val style = cornerRadiusDp to dark
-        if (appliedStyles[view] == style) return
-        if (!dark) {
+        if (!view.context.isDarkMode) {
             restoreOriginalBackground(view)
             return
         }
-        originalBackgrounds.putIfAbsent(view, view.background)
-        val radiusPx = cornerRadiusDp * view.resources.displayMetrics.density
-        val strokeWidthPx = 1 * view.resources.displayMetrics.density
+
+        if (!originalBackgrounds.containsKey(view)) {
+            originalBackgrounds[view] = view.background
+        }
+
+        val density = view.resources.displayMetrics.density
+        val strokeWidthPx = (DARK_STROKE_WIDTH_DP * density).roundToInt().coerceAtLeast(1)
+        val style = AppliedStyle(cornerRadiusDp, strokeWidthPx)
+        val appliedBackground = appliedBackgrounds[view]
+        if (appliedStyles[view] == style && view.background === appliedBackground) return
+
+        val radiusPx = cornerRadiusDp * density
         val background = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = radiusPx
