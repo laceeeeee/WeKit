@@ -691,7 +691,7 @@ object FloatingChatHeader : ClickableFeature() {
         // 所以按特征递归找: 纯 View + 全尺寸参数。
         val cached = tipsBarDims[group]
         val dims = cached?.takeIf { list -> list.all { it.parent !== null } }
-            ?: group.findViewsWhich { it.isTipsBarDim() }.toList()
+            ?: group.findViewsWhich<View> { it.isTipsBarDim() }.toList()
         if (dims.isEmpty()) {
             if (dimWarned.put(group, true) == null) {
                 val tree = group.allViews.take(30).joinToString(", ") { v ->
@@ -726,7 +726,7 @@ object FloatingChatHeader : ClickableFeature() {
     /** 提示条组内容列表 (MaxHeightWxRecyclerView), 找不到时返回 null。 */
     private fun tipsBarRecycler(group: View): View? {
         tipsBarRecyclers[group]?.takeIf { it.isAttachedToWindow }?.let { return it }
-        val found = group.findViewWhich {
+        val found = group.findViewWhich<View> {
             it.javaClass.name == "com.tencent.mm.view.recyclerview.MaxHeightWxRecyclerView"
         }
         if (found != null) tipsBarRecyclers[group] = found
@@ -746,7 +746,7 @@ object FloatingChatHeader : ClickableFeature() {
      * 撑到卡片全高; 和 dim (ow1, 全尺寸) 靠高度参数区分。 */
     private fun tipsBarPlaceholder(group: View): View? {
         tipsBarPlaceholders[group]?.takeIf { it.parent != null }?.let { return it }
-        val found = group.findViewWhich { view ->
+        val found = group.findViewWhich<View> { view ->
             view.javaClass.name == "android.view.View" &&
                 view.layoutParams?.width == ViewGroup.LayoutParams.MATCH_PARENT &&
                 view.layoutParams?.height != ViewGroup.LayoutParams.MATCH_PARENT
@@ -1127,7 +1127,7 @@ object FloatingChatHeader : ClickableFeature() {
     /** 给置顶消息行补 ×N 角标, 加在行内横向 LinearLayout 末尾 (消息文本 weight 之外)。 */
     private fun ensurePinnedRowBadge(row: View): TextView? {
         tipsBarRowBadges[row]?.let { return it }
-        val line = row.findViewWhich {
+        val line = row.findViewWhich<View> {
             it is LinearLayout && it.orientation == LinearLayout.HORIZONTAL
         } as? LinearLayout ?: return null
         tipsBarRowLines[row] = line
@@ -1194,7 +1194,7 @@ object FloatingChatHeader : ClickableFeature() {
      * 下, 不是组的直接子 View, 必须整树找)。 */
     private fun tipsBarCardBody(group: View): View? {
         tipsBarCardBodies[group]?.takeIf { it.parent != null }?.let { return it }
-        val found = group.findViewWhich { it is RelativeLayout }
+        val found = group.findViewWhich<View> { it is RelativeLayout }
         if (found != null) tipsBarCardBodies[group] = found
         return found
     }
