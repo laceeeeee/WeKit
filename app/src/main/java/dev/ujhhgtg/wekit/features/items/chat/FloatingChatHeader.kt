@@ -23,12 +23,16 @@ import android.widget.LinearLayout
 import android.widget.RelativeLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.core.graphics.toColorInt
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
@@ -42,6 +46,7 @@ import dev.ujhhgtg.wekit.ui.content.AlertDialogContent
 import dev.ujhhgtg.wekit.ui.content.Button
 import dev.ujhhgtg.wekit.ui.content.DefaultColumn
 import dev.ujhhgtg.wekit.ui.content.TextButton
+import dev.ujhhgtg.wekit.ui.content.WeColorField
 import dev.ujhhgtg.wekit.ui.utils.ListItem
 import dev.ujhhgtg.wekit.ui.utils.allViews
 import dev.ujhhgtg.wekit.ui.utils.findViewWhich
@@ -106,6 +111,12 @@ object FloatingChatHeader : ClickableFeature() {
     private var topGapDp by prefOption("floating_chat_header_top_gap", DEFAULT_TOP_GAP)
     private var extraGapDp by prefOption("floating_chat_header_extra_gap", DEFAULT_EXTRA_GAP)
     private var elevationDp by prefOption("floating_chat_header_elevation", DEFAULT_ELEVATION)
+
+    /** 自定义卡片背景色 (#AARRGGBB, 支持半透明); null 跟随系统默认。 */
+    private var customSurfaceHex by prefOption("floating_chat_header_surface_color", null as String?)
+
+    /** 自定义卡片描边色; null 用内置默认。 */
+    private var customStrokeHex by prefOption("floating_chat_header_stroke_color", null as String?)
 
     /** 每个会话页布局 (ChattingUILayout) 对应的标题栏容器。 */
     private val headerViews = WeakHashMap<View, View>()
@@ -449,12 +460,21 @@ object FloatingChatHeader : ClickableFeature() {
         WeLogger.d(TAG, "reparented title bar onto chat root (topOffset=${headerTopOffsets[layout]})")
     }
 
+    /** 解析 #AARRGGBB/#RRGGBB 十六进制颜色; 空串或非法返回 null (跟随系统)。 */
+    private fun parseCustomColor(hex: String?): Int? =
+        hex?.takeIf(String::isNotBlank)?.let { runCatching { it.toColorInt() }.getOrNull() }
+
     /** 圆角 / 裁剪 / 阴影 / 暗色浮层, 与悬浮输入框同一套绘制属性; 标题栏和标题区挂件共用。 */
     private fun applyCardStyle(view: View) {
         val style = HeaderStyle(cornerRadiusDp, elevationDp)
         val density = view.resources.displayMetrics.density
         val expectedElevation = elevationDp * density
-        FloatingChatCardVisuals.applyDarkSurface(view, cornerRadiusDp)
+        FloatingChatCardVisuals.applyCardSurface(
+            view,
+            cornerRadiusDp,
+            parseCustomColor(customSurfaceHex),
+            parseCustomColor(customStrokeHex),
+        )
         // 半屏路径微信会在展开动画结束时清掉 ActionBarContainer 的 outline (m.a()),
         // 只按样式缓存判断会漏掉这次恢复, 所以 outline/elevation 被微信改掉时也要重刷。
         if (headerStyles[view] == style &&
@@ -485,7 +505,12 @@ object FloatingChatHeader : ClickableFeature() {
      */
     private fun applyTipsBarCardStyle(group: View) {
         val style = HeaderStyle(cornerRadiusDp, elevationDp)
-        FloatingChatCardVisuals.applyDarkSurface(group, cornerRadiusDp)
+        FloatingChatCardVisuals.applyCardSurface(
+            group,
+            cornerRadiusDp,
+            parseCustomColor(customSurfaceHex),
+            parseCustomColor(customStrokeHex),
+        )
         if (tipsBarStyles[group] != style) {
             val density = group.resources.displayMetrics.density
             group.outlineProvider = group.outlineProvider as? TipsBarCardOutline
@@ -817,7 +842,12 @@ object FloatingChatHeader : ClickableFeature() {
             }
             return
         }
-        FloatingChatCardVisuals.applyDarkSurface(body, cornerRadiusDp)
+        FloatingChatCardVisuals.applyCardSurface(
+            body,
+            cornerRadiusDp,
+            parseCustomColor(customSurfaceHex),
+            parseCustomColor(customStrokeHex),
+        )
         // 早退 2: 找不到内容列表 (MaxHeightWxRecyclerView), 保留原生布局。
         val recycler = tipsBarRecycler(group) ?: return
         // 早退 3: 只对置顶消息行 (s4.xml 结构) 生效; 直播等其它提示条共用同一组件, 不碰。
@@ -1431,6 +1461,8 @@ object FloatingChatHeader : ClickableFeature() {
             var gapInput by remember { mutableFloatStateOf(topGapDp.toFloat()) }
             var extraGapInput by remember { mutableFloatStateOf(extraGapDp.toFloat()) }
             var elevInput by remember { mutableFloatStateOf(elevationDp.toFloat()) }
+            var surfaceInput by remember { mutableStateOf(customSurfaceHex ?: "") }
+            var strokeInput by remember { mutableStateOf(customStrokeHex ?: "") }
 
             AlertDialogContent(
                 title = { Text("悬浮标题栏") },
@@ -1507,6 +1539,18 @@ object FloatingChatHeader : ClickableFeature() {
                                 )
                             }
                         )
+                        WeColorField(
+                            label = "卡片背景色 (留空跟随系统)",
+                            value = surfaceInput,
+                            onValueChange = { surfaceInput = it.takeIf(String::isNotBlank) ?: "" },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        WeColorField(
+                            label = "卡片描边色 (留空跟随系统)",
+                            value = strokeInput,
+                            onValueChange = { strokeInput = it.takeIf(String::isNotBlank) ?: "" },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
                 },
                 dismissButton = { TextButton(onDismiss) { Text("取消") } },
@@ -1517,6 +1561,8 @@ object FloatingChatHeader : ClickableFeature() {
                         topGapDp = gapInput.roundToInt()
                         extraGapDp = extraGapInput.roundToInt()
                         elevationDp = elevInput.roundToInt()
+                        customSurfaceHex = surfaceInput.takeIf(String::isNotBlank)
+                        customStrokeHex = strokeInput.takeIf(String::isNotBlank)
                         onDismiss()
                     }) { Text("确定") }
                 }
