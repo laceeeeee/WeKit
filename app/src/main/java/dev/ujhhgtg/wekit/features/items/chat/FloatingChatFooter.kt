@@ -8,7 +8,6 @@ import android.view.ViewOutlineProvider
 import android.view.WindowInsets
 import android.widget.RelativeLayout
 import androidx.activity.ComponentActivity
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -18,8 +17,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.core.graphics.toColorInt
 import com.tencent.mm.pluginsdk.ui.chat.AppPanel
 import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
 import com.tencent.mm.pluginsdk.ui.chat.ChatFooterBottom
@@ -38,7 +35,6 @@ import dev.ujhhgtg.wekit.ui.content.AlertDialogContent
 import dev.ujhhgtg.wekit.ui.content.Button
 import dev.ujhhgtg.wekit.ui.content.DefaultColumn
 import dev.ujhhgtg.wekit.ui.content.TextButton
-import dev.ujhhgtg.wekit.ui.content.WeColorField
 import dev.ujhhgtg.wekit.ui.utils.findViewWhich
 import dev.ujhhgtg.wekit.ui.utils.showComposeDialog
 import dev.ujhhgtg.wekit.utils.WeLogger
@@ -64,7 +60,6 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
     private const val DEFAULT_SIDE_MARGIN = 12
     private const val DEFAULT_BOTTOM_GAP = 4
     private const val DEFAULT_ELEVATION = 4
-    private const val DEFAULT_BG_ALPHA = 100
 
     private const val MIN_CORNER_RADIUS = 0
     private const val MAX_CORNER_RADIUS = 32
@@ -74,8 +69,6 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
     private const val MAX_BOTTOM_GAP = 24
     private const val MIN_ELEVATION = 0
     private const val MAX_ELEVATION = 16
-    private const val MIN_BG_ALPHA = 0
-    private const val MAX_BG_ALPHA = 100
 
     /** 键盘与面板同时展开时, 至少给会话内容留出的高度。 */
     private const val PANEL_TOP_RESERVE_DP = 120
@@ -116,19 +109,6 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
     private var sideMarginDp by prefOption("floating_chat_footer_side_margin", DEFAULT_SIDE_MARGIN)
     private var bottomGapDp by prefOption("floating_chat_footer_bottom_gap", DEFAULT_BOTTOM_GAP)
     private var elevationDp by prefOption("floating_chat_footer_elevation", DEFAULT_ELEVATION)
-
-    /** 自定义卡片背景色 (#AARRGGBB, 支持半透明); null 保留微信原生背景。 */
-    private var customSurfaceHex by prefOption("floating_chat_footer_surface_color", null as String?)
-
-    /** 自定义卡片描边色; null 用内置默认。 */
-    private var customStrokeHex by prefOption("floating_chat_footer_stroke_color", null as String?)
-
-    /**
-     * 悬浮卡片背景透明度 (0~100)。0 = 完全透明: 卡片自身不再绘制背景, 直接透出会话页背景;
-     * 100 = 不透明, 保持微信原底栏底色。对 footer 的 background 生效 (不含表情/工具面板
-     * 自己的背景)。
-     */
-    private var backgroundAlpha by prefOption("floating_chat_footer_bg_alpha", DEFAULT_BG_ALPHA)
 
     /**
      * Locates ChatFooter.refreshBottomHeight() by the unique log string WeChat emits at the
@@ -246,13 +226,8 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
 
         // 微信在这里写入 bottomMargin = -面板高, 我们在它之后覆盖掉;
         // 顺便重算面板高度 —— 这里同样会把容器高度改回微信那套值。
-        // 键盘弹出/收起、面板开合都会走到这里 —— 顺带把悬浮样式整体重贴一遍,
-        // 防止微信的布局写入把边距/圆角/阴影/透明度冲掉, 保证弹输入法后仍是悬浮卡片。
         methodRefreshBottomHeight.hookAfter {
             val footer = thisObject as ChatFooter
-            applySideMargins(footer)
-            applyDrawingStyle(footer)
-            footer.invalidateOutline()
             if (!movePanelAbove) {
                 applyBottomGap(footer)
                 return@hookAfter
@@ -527,11 +502,7 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
             return null
         }
 
-    /** 解析 #AARRGGBB/#RRGGBB 十六进制颜色; 空串或非法返回 null (保留微信原生背景)。 */
-    private fun parseCustomColor(hex: String?): Int? =
-        hex?.takeIf(String::isNotBlank)?.let { runCatching { it.toColorInt() }.getOrNull() }
-
-    /** 设置 outline / 圆角裁剪 / 阴影 / 自定义底色 / 背景透明度 —— 全是不依赖 LayoutParams 的绘制属性, 可重复调用。 */
+    /** 设置 outline / 圆角裁剪 / 阴影 —— 全是不依赖 LayoutParams 的绘制属性, 可重复调用。 */
     private fun applyDrawingStyle(footer: ChatFooter) {
         val density = footer.resources.displayMetrics.density
         footer.outlineProvider = object : ViewOutlineProvider() {
@@ -543,21 +514,8 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
         }
         footer.clipToOutline = true
         footer.elevation = elevationDp * density
-        FloatingChatCardVisuals.applyCardSurface(
-            footer,
-            cornerRadiusDp,
-            parseCustomColor(customSurfaceHex),
-            parseCustomColor(customStrokeHex),
-            applyBuiltInDarkSurface = false,
-        )
-        // 背景透明: 先 mutate 保证不污染共享 drawable, 再把改动挂回 view
-        footer.background = footer.background?.mutate()
-        footer.background?.alpha = (backgroundAlpha * 255 / 100).coerceIn(0, 255)
         if (!movePanelAbove) trackOutlineWhileScrolling(footer)
-        WeLogger.d(
-            TAG,
-            "applied drawing style: corner=${cornerRadiusDp}dp elev=${elevationDp}dp alpha=$backgroundAlpha"
-        )
+        WeLogger.d(TAG, "applied drawing style: corner=${cornerRadiusDp}dp elev=${elevationDp}dp")
     }
 
     /**
@@ -695,10 +653,7 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
             var sideInput by remember { mutableFloatStateOf(sideMarginDp.toFloat()) }
             var gapInput by remember { mutableFloatStateOf(bottomGapDp.toFloat()) }
             var elevInput by remember { mutableFloatStateOf(elevationDp.toFloat()) }
-            var bgAlphaInput by remember { mutableFloatStateOf(backgroundAlpha.toFloat()) }
             var panelAboveInput by remember { mutableStateOf(movePanelAbove) }
-            var surfaceInput by remember { mutableStateOf(customSurfaceHex ?: "") }
-            var strokeInput by remember { mutableStateOf(customStrokeHex ?: "") }
 
             AlertDialogContent(
                 title = { Text("悬浮输入框") },
@@ -760,29 +715,6 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
                                 )
                             }
                         )
-                        WeColorField(
-                            label = "卡片背景色 (含透明度, 留空保留原样)",
-                            value = surfaceInput,
-                            onValueChange = { surfaceInput = it.takeIf(String::isNotBlank) ?: "" },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        WeColorField(
-                            label = "卡片描边色 (留空跟随系统)",
-                            value = strokeInput,
-                            onValueChange = { strokeInput = it.takeIf(String::isNotBlank) ?: "" },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        ListItem(
-                            headlineContent = { Text("背景透明度: ${bgAlphaInput.roundToInt()}%") },
-                            supportingContent = {
-                                Slider(
-                                    value = bgAlphaInput,
-                                    onValueChange = { bgAlphaInput = it },
-                                    valueRange = MIN_BG_ALPHA.toFloat()..MAX_BG_ALPHA.toFloat(),
-                                    steps = MAX_BG_ALPHA - MIN_BG_ALPHA - 1
-                                )
-                            }
-                        )
                     }
                 },
                 dismissButton = { TextButton(onDismiss) { Text("取消") } },
@@ -793,9 +725,6 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
                         sideMarginDp = sideInput.roundToInt()
                         bottomGapDp = gapInput.roundToInt()
                         elevationDp = elevInput.roundToInt()
-                        customSurfaceHex = surfaceInput.takeIf(String::isNotBlank)
-                        customStrokeHex = strokeInput.takeIf(String::isNotBlank)
-                        backgroundAlpha = bgAlphaInput.roundToInt()
                         onDismiss()
                     }) { Text("确定") }
                 }

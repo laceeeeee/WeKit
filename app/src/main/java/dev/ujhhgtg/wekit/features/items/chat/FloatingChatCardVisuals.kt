@@ -39,21 +39,14 @@ internal object FloatingChatCardVisuals {
      *   built-in surface, light mode keeps WeChat's own background); when set, it is used in
      *   both modes and its alpha is honored.
      * @param customStrokeColor hairline border color; null uses the built-in one.
-     * @param applyBuiltInDarkSurface when true (default) a null [customSurfaceColor] paints the
-     *   built-in surface in dark mode, like the floating title bar; when false, a null
-     *   [customSurfaceColor] leaves the view's own background untouched in both modes, like the
-     *   floating input bar.
      */
     fun applyCardSurface(
         view: View,
         cornerRadiusDp: Int,
         customSurfaceColor: Int? = null,
         customStrokeColor: Int? = null,
-        applyBuiltInDarkSurface: Boolean = true,
     ) {
-        val surfaceColor = customSurfaceColor
-            ?: if (applyBuiltInDarkSurface) DEFAULT_DARK_SURFACE_COLOR else null
-        if (surfaceColor == null) {
+        if (customSurfaceColor == null && !view.context.isDarkMode) {
             restoreOriginalBackground(view)
             return
         }
@@ -64,6 +57,7 @@ internal object FloatingChatCardVisuals {
 
         val density = view.resources.displayMetrics.density
         val strokeWidthPx = (STROKE_WIDTH_DP * density).roundToInt().coerceAtLeast(1)
+        val surfaceColor = customSurfaceColor ?: DEFAULT_DARK_SURFACE_COLOR
         val strokeColor = customStrokeColor ?: DEFAULT_STROKE_COLOR
         val style = AppliedStyle(cornerRadiusDp, strokeWidthPx, surfaceColor, strokeColor)
         val appliedBackground = appliedBackgrounds[view]
