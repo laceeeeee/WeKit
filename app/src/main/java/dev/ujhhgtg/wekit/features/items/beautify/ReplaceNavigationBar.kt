@@ -145,6 +145,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
     private var enabledTabs by prefOption("nav_bar_enabled_tabs", TAB_ITEMS.map { it.wechatIndex.toString() }.toSet())
     private var barHeightDp by prefOption("nav_bar_height", BASE_BAR_HEIGHT_DP)
     private var barWidthPercent by prefOption("nav_bar_width", 100)
+    private var bottomOffsetDp by prefOption("nav_bar_bottom_offset", DEFAULT_BOTTOM_OFFSET_DP)
     private var colorBackground by prefOption("nav_bar_color_background", null as String?)
     private var colorActive by prefOption("nav_bar_color_active", null as String?)
     private var colorInactive by prefOption("nav_bar_color_inactive", null as String?)
@@ -164,6 +165,11 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
     private const val MIN_BAR_WIDTH_PERCENT = 50
     private const val MAX_BAR_WIDTH_PERCENT = 100
     private const val BAR_WIDTH_STEP = 5
+
+    private const val DEFAULT_BOTTOM_OFFSET_DP = 12
+    private const val MIN_BOTTOM_OFFSET_DP = 0
+    private const val MAX_BOTTOM_OFFSET_DP = 120
+    private const val BOTTOM_OFFSET_STEP = 2
 
     // Matches the double-tap threshold WeChat's own tab listener (f8/r8) uses.
     private const val DOUBLE_TAP_WINDOW_MS = 300L
@@ -412,6 +418,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
             val barScale = barScalePercent.coerceIn(MIN_BAR_SCALE, MAX_BAR_SCALE) / 100f
             val barHeight = barHeightDp.coerceIn(MIN_BAR_HEIGHT_DP, MAX_BAR_HEIGHT_DP)
             val barWidthFraction = barWidthPercent.coerceIn(MIN_BAR_WIDTH_PERCENT, MAX_BAR_WIDTH_PERCENT) / 100f
+            val bottomOffsetDpValue = bottomOffsetDp.coerceIn(MIN_BOTTOM_OFFSET_DP, MAX_BOTTOM_OFFSET_DP)
             val customContainerHex = colorBackground
             val customActiveHex = colorActive
             val customInactiveHex = colorInactive
@@ -575,7 +582,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                                                 onClick = {},
                                             )
                                             .padding(
-                                                bottom = 12.dp + WindowInsets.navigationBars.asPaddingValues()
+                                                bottom = bottomOffsetDpValue.dp + WindowInsets.navigationBars.asPaddingValues()
                                                     .calculateBottomPadding()
                                             ),
                                         // Spring target: on a tap this is the tapped tab, so the
@@ -810,6 +817,9 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
             var barWidthInput by remember {
                 mutableFloatStateOf(barWidthPercent.coerceIn(MIN_BAR_WIDTH_PERCENT, MAX_BAR_WIDTH_PERCENT).toFloat())
             }
+            var bottomOffsetInput by remember {
+                mutableFloatStateOf(bottomOffsetDp.coerceIn(MIN_BOTTOM_OFFSET_DP, MAX_BOTTOM_OFFSET_DP).toFloat())
+            }
             var colorBackgroundInput by remember { mutableStateOf(colorBackground ?: "") }
             var colorActiveInput by remember { mutableStateOf(colorActive ?: "") }
             var colorInactiveInput by remember { mutableStateOf(colorInactive ?: "") }
@@ -915,6 +925,17 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                             },
                             headlineContent = { Text("底栏宽度: ${barWidthInput.roundToInt()}%") },
                         )
+                        ListItem(
+                            supportingContent = {
+                                Slider(
+                                    value = bottomOffsetInput,
+                                    onValueChange = { bottomOffsetInput = it },
+                                    valueRange = MIN_BOTTOM_OFFSET_DP.toFloat()..MAX_BOTTOM_OFFSET_DP.toFloat(),
+                                    steps = (MAX_BOTTOM_OFFSET_DP - MIN_BOTTOM_OFFSET_DP) / BOTTOM_OFFSET_STEP - 1
+                                )
+                            },
+                            headlineContent = { Text("底栏离底部距离: ${bottomOffsetInput.roundToInt()} dp") },
+                        )
                         WeColorField(
                             label = "栏底色 (留空跟随系统)",
                             value = colorBackgroundInput,
@@ -958,6 +979,7 @@ object ReplaceNavigationBar : ClickableFeature(), IResolveDex {
                         barScalePercent = barScaleInput.roundToInt()
                         barHeightDp = barHeightInput.roundToInt()
                         barWidthPercent = barWidthInput.roundToInt()
+                        bottomOffsetDp = bottomOffsetInput.roundToInt()
                         colorBackground = colorBackgroundInput.takeIf(String::isNotBlank)
                         colorActive = colorActiveInput.takeIf(String::isNotBlank)
                         colorInactive = colorInactiveInput.takeIf(String::isNotBlank)
