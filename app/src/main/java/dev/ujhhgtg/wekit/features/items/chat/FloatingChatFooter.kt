@@ -1,6 +1,8 @@
 package dev.ujhhgtg.wekit.features.items.chat
 
+import android.graphics.Color
 import android.graphics.Outline
+import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.view.View
 import android.view.ViewGroup
@@ -195,7 +197,9 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
 
         // 绘制属性不依赖 LayoutParams, 构造完就能设
         ChatFooter::class.constructor.hookAfter {
-            applyDrawingStyle(thisObject as ChatFooter)
+            val footer = thisObject as ChatFooter
+            applyDrawingStyle(footer)
+            revealChatBackground(footer)
         }
 
         // 结构改造与边距必须等 LayoutParams 就位 —— 它由父容器 (ChattingScrollLayout)
@@ -206,6 +210,7 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
         reflekt.firstMethod { name = "onAttachedToWindow" }.hookAfter {
             val footer = thisObject as ChatFooter
             applyDrawingStyle(footer)
+            revealChatBackground(footer)
             applySideMargins(footer)
             if (movePanelAbove) {
                 reparentBottomPanel(footer)
@@ -226,8 +231,11 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
 
         // 微信在这里写入 bottomMargin = -面板高, 我们在它之后覆盖掉;
         // 顺便重算面板高度 —— 这里同样会把容器高度改回微信那套值。
+        // 键盘弹出/收起、面板开合都会走到这里 —— 微信可能借机重写 footer 及其
+        // 父链的背景 (主题色), 顺带把透明背景重新铺上, 防止沉浸被打回。
         methodRefreshBottomHeight.hookAfter {
             val footer = thisObject as ChatFooter
+            revealChatBackground(footer)
             if (!movePanelAbove) {
                 applyBottomGap(footer)
                 return@hookAfter
@@ -516,6 +524,34 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
         footer.elevation = elevationDp * density
         if (!movePanelAbove) trackOutlineWhileScrolling(footer)
         WeLogger.d(TAG, "applied drawing style: corner=${cornerRadiusDp}dp elev=${elevationDp}dp")
+    }
+
+    /**
+     * 微信自带"聊天背景"壁纸铺在聊天页根布局上, 悬浮输入框开启后 footer 与屏幕边缘脱开,
+     * 周围会露出一圈父链容器自带的不透明主题背景 (浅色=灰白, 深色=黑), 把壁纸挡住。
+     *
+     * 这里从 footer 的父容器向上, 把不透明纯色背景清成透明, 直到遇到第一层非纯色背景
+     * (壁纸本身是图片/渐变这类 drawable, 遇到它即停, 不会误伤壁纸层), 让壁纸一路透到
+     * 悬浮输入框四周。footer 自身的背景保持微信原生, 不影响卡片外观。
+     *
+     * 幂等且廉价: 已透明/没有背景的层直接跳过, 刷新布局时重跑无副作用。
+     */
+    private fun revealChatBackground(footer: ChatFooter) {
+        var current: View? = footer.parent as? View
+        var depth = 0
+        while (current != null && depth < 6) {
+            val background = current.background ?: run { current = current.parent as? View; depth++; continue }
+            if (background is ColorDrawable && background.color != Color.TRANSPARENT &&
+                Color.alpha(background.color) == 0xFF
+            ) {
+                current.background = null
+                current = current.parent as? View
+            } else {
+                break
+            }
+            depth++
+        }
+        WeLogger.d(TAG, "revealed chat wallpaper behind floating footer")
     }
 
     /**
