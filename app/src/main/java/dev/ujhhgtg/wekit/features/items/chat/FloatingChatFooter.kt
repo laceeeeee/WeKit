@@ -8,6 +8,7 @@ import android.view.ViewOutlineProvider
 import android.view.WindowInsets
 import android.widget.RelativeLayout
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -17,6 +18,8 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.core.graphics.toColorInt
 import com.tencent.mm.pluginsdk.ui.chat.AppPanel
 import com.tencent.mm.pluginsdk.ui.chat.ChatFooter
 import com.tencent.mm.pluginsdk.ui.chat.ChatFooterBottom
@@ -35,6 +38,7 @@ import dev.ujhhgtg.wekit.ui.content.AlertDialogContent
 import dev.ujhhgtg.wekit.ui.content.Button
 import dev.ujhhgtg.wekit.ui.content.DefaultColumn
 import dev.ujhhgtg.wekit.ui.content.TextButton
+import dev.ujhhgtg.wekit.ui.content.WeColorField
 import dev.ujhhgtg.wekit.ui.utils.findViewWhich
 import dev.ujhhgtg.wekit.ui.utils.showComposeDialog
 import dev.ujhhgtg.wekit.utils.WeLogger
@@ -109,6 +113,12 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
     private var sideMarginDp by prefOption("floating_chat_footer_side_margin", DEFAULT_SIDE_MARGIN)
     private var bottomGapDp by prefOption("floating_chat_footer_bottom_gap", DEFAULT_BOTTOM_GAP)
     private var elevationDp by prefOption("floating_chat_footer_elevation", DEFAULT_ELEVATION)
+
+    /** 自定义卡片背景色 (#AARRGGBB, 支持半透明); null 保留微信原生背景。 */
+    private var customSurfaceHex by prefOption("floating_chat_footer_surface_color", null as String?)
+
+    /** 自定义卡片描边色; null 用内置默认。 */
+    private var customStrokeHex by prefOption("floating_chat_footer_stroke_color", null as String?)
 
     /**
      * Locates ChatFooter.refreshBottomHeight() by the unique log string WeChat emits at the
@@ -502,7 +512,11 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
             return null
         }
 
-    /** 设置 outline / 圆角裁剪 / 阴影 —— 全是不依赖 LayoutParams 的绘制属性, 可重复调用。 */
+    /** 解析 #AARRGGBB/#RRGGBB 十六进制颜色; 空串或非法返回 null (保留微信原生背景)。 */
+    private fun parseCustomColor(hex: String?): Int? =
+        hex?.takeIf(String::isNotBlank)?.let { runCatching { it.toColorInt() }.getOrNull() }
+
+    /** 设置 outline / 圆角裁剪 / 阴影 / 自定义底色 —— 全是不依赖 LayoutParams 的绘制属性, 可重复调用。 */
     private fun applyDrawingStyle(footer: ChatFooter) {
         val density = footer.resources.displayMetrics.density
         footer.outlineProvider = object : ViewOutlineProvider() {
@@ -514,6 +528,13 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
         }
         footer.clipToOutline = true
         footer.elevation = elevationDp * density
+        FloatingChatCardVisuals.applyCardSurface(
+            footer,
+            cornerRadiusDp,
+            parseCustomColor(customSurfaceHex),
+            parseCustomColor(customStrokeHex),
+            applyBuiltInDarkSurface = false,
+        )
         if (!movePanelAbove) trackOutlineWhileScrolling(footer)
         WeLogger.d(TAG, "applied drawing style: corner=${cornerRadiusDp}dp elev=${elevationDp}dp")
     }
@@ -654,6 +675,8 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
             var gapInput by remember { mutableFloatStateOf(bottomGapDp.toFloat()) }
             var elevInput by remember { mutableFloatStateOf(elevationDp.toFloat()) }
             var panelAboveInput by remember { mutableStateOf(movePanelAbove) }
+            var surfaceInput by remember { mutableStateOf(customSurfaceHex ?: "") }
+            var strokeInput by remember { mutableStateOf(customStrokeHex ?: "") }
 
             AlertDialogContent(
                 title = { Text("悬浮输入框") },
@@ -715,6 +738,18 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
                                 )
                             }
                         )
+                        WeColorField(
+                            label = "卡片背景色 (含透明度, 留空保留原样)",
+                            value = surfaceInput,
+                            onValueChange = { surfaceInput = it.takeIf(String::isNotBlank) ?: "" },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        WeColorField(
+                            label = "卡片描边色 (留空跟随系统)",
+                            value = strokeInput,
+                            onValueChange = { strokeInput = it.takeIf(String::isNotBlank) ?: "" },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
                 },
                 dismissButton = { TextButton(onDismiss) { Text("取消") } },
@@ -725,6 +760,8 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
                         sideMarginDp = sideInput.roundToInt()
                         bottomGapDp = gapInput.roundToInt()
                         elevationDp = elevInput.roundToInt()
+                        customSurfaceHex = surfaceInput.takeIf(String::isNotBlank)
+                        customStrokeHex = strokeInput.takeIf(String::isNotBlank)
                         onDismiss()
                     }) { Text("确定") }
                 }
