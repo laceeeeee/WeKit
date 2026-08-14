@@ -3,6 +3,7 @@ package dev.ujhhgtg.wekit.features.items.chat
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.view.View
 import android.view.ViewGroup
@@ -527,23 +528,34 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
     }
 
     /**
-     * 微信自带"聊天背景"壁纸铺在聊天页根布局上, 悬浮输入框开启后 footer 与屏幕边缘脱开,
-     * 周围会露出一圈父链容器自带的不透明主题背景 (浅色=灰白, 深色=黑), 把壁纸挡住。
+     * 微信自带"聊天背景"壁纸铺在聊天页根布局上, ChatFooter 自身有一条不透明的
+     * 主题色背景 (浅色=灰白, 深色=黑) 盖在壁纸上 —— 悬浮化后这条背景加上父链容器
+     * 的背景把壁纸整个挡住, 输入框周围于是露灰。
      *
-     * 这里从 footer 的父容器向上, 把不透明纯色背景清成透明, 直到遇到第一层非纯色背景
-     * (壁纸本身是图片/渐变这类 drawable, 遇到它即停, 不会误伤壁纸层), 让壁纸一路透到
-     * 悬浮输入框四周。footer 自身的背景保持微信原生, 不影响卡片外观。
+     * 这里把 footer 自身背景清空, 并从父容器向上把不透明纯色背景清成透明, 直到遇到
+     * 第一层非纯色背景 (壁纸本身是图片/渐变这类 drawable, 遇到它即停, 不会误伤壁纸层),
+     * 让壁纸一路透到悬浮输入框及四周。输入行等子 View 保留自己的背景, 可读性不受影响。
      *
      * 幂等且廉价: 已透明/没有背景的层直接跳过, 刷新布局时重跑无副作用。
      */
     private fun revealChatBackground(footer: ChatFooter) {
+        if (footer.background != null) {
+            footer.background = null
+        }
         var current: View? = footer.parent as? View
         var depth = 0
         while (current != null && depth < 6) {
             val background = current.background ?: run { current = current.parent as? View; depth++; continue }
-            if (background is ColorDrawable && background.color != Color.TRANSPARENT &&
-                Color.alpha(background.color) == 0xFF
-            ) {
+            val opaque = when (background) {
+                is ColorDrawable ->
+                    background.color != Color.TRANSPARENT && Color.alpha(background.color) == 0xFF
+                is GradientDrawable -> {
+                    val color = runCatching { background.color as? Int }.getOrNull() ?: 0
+                    color != Color.TRANSPARENT && Color.alpha(color) == 0xFF
+                }
+                else -> false
+            }
+            if (opaque) {
                 current.background = null
                 current = current.parent as? View
             } else {
