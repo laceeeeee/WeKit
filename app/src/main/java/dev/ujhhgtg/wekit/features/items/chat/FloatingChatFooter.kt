@@ -94,6 +94,9 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
     /** 已经装过 outline 追踪器的 footer, 防止重复注册 OnPreDrawListener。 */
     private val outlineTrackers = WeakHashMap<View, Boolean>()
 
+    /** 已经装过背景透明追踪器的 footer, 防止重复注册 OnPreDrawListener。 */
+    private val backgroundTrackers = WeakHashMap<View, Boolean>()
+
     /** 临时挪动面板期间保存的原 translationY。key 是 ChatFooterBottom。 */
     private val savedPanelTranslations = WeakHashMap<View, Float>()
 
@@ -212,6 +215,7 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
             val footer = thisObject as ChatFooter
             applyDrawingStyle(footer)
             revealChatBackground(footer)
+            trackBackgroundTransparency(footer)
             applySideMargins(footer)
             if (movePanelAbove) {
                 reparentBottomPanel(footer)
@@ -528,34 +532,23 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
     }
 
     /**
-     * 微信自带"聊天背景"壁纸铺在聊天页根布局上, ChatFooter 自身有一条不透明的
-     * 主题色背景 (浅色=灰白, 深色=黑) 盖在壁纸上 —— 悬浮化后这条背景加上父链容器
-     * 的背景把壁纸整个挡住, 输入框周围于是露灰。
+     * 微信自带"聊天背景"壁纸铺在聊天页根布局上, ChatFooter 内部各容器 (输入列/引用条/
+     * 输入行等) 自带主题色背景 (浅色=灰白, 深色=黑, 常见半透明遮罩), 悬浮化后这些背景
+     * 连同父链容器的背景一起把壁纸挡住, 输入框及四周于是露灰。
      *
-     * 这里把 footer 自身背景清空, 并从父容器向上把不透明纯色背景清成透明, 直到遇到
-     * 第一层非纯色背景 (壁纸本身是图片/渐变这类 drawable, 遇到它即停, 不会误伤壁纸层),
-     * 让壁纸一路透到悬浮输入框及四周。输入行等子 View 保留自己的背景, 可读性不受影响。
+     * footer 内部不可能铺壁纸, 后代容器的背景全部无条件清空; 祖先链则只清"纯色"背景,
+     * 遇到第一层非纯色背景 (壁纸本身是图片/渐变这类 drawable) 即停, 不误伤壁纸层。
+     * 控件类子 View (EditText/按钮等) 的背景保留, 可读性不受影响。
      *
      * 幂等且廉价: 已透明/没有背景的层直接跳过, 刷新布局时重跑无副作用。
      */
     private fun revealChatBackground(footer: ChatFooter) {
-        if (footer.background != null) {
-            footer.background = null
-        }
+        clearContainerBackgrounds(footer)
         var current: View? = footer.parent as? View
         var depth = 0
         while (current != null && depth < 6) {
             val background = current.background ?: run { current = current.parent as? View; depth++; continue }
-            val opaque = when (background) {
-                is ColorDrawable ->
-                    background.color != Color.TRANSPARENT && Color.alpha(background.color) == 0xFF
-                is GradientDrawable -> {
-                    val color = runCatching { background.color as? Int }.getOrNull() ?: 0
-                    color != Color.TRANSPARENT && Color.alpha(color) == 0xFF
-                }
-                else -> false
-            }
-            if (opaque) {
+            if (isOpaqueColorBackground(background)) {
                 current.background = null
                 current = current.parent as? View
             } else {
@@ -564,6 +557,40 @@ object FloatingChatFooter : ClickableFeature(), IResolveDex {
             depth++
         }
         WeLogger.d(TAG, "revealed chat wallpaper behind floating footer")
+    }
+
+    /** 纯色背景且非全透明 —— 微信主题底色/遮罩都长这样, 清掉透出壁纸。 */
+    private fun isOpaqueColorBackground(background: android.graphics.drawable.Drawable): Boolean =
+        when (background) {
+            is ColorDrawable -> background.color != Color.TRANSPARENT
+            is GradientDrawable -> {
+                val color = runCatching { background.color as? Int }.getOrNull()
+                color != null && color != Color.TRANSPARENT
+            }
+            else -> false
+        }
+
+    /** 清空 [view] 自身及全部后代**容器** (ViewGroup) 的背景, 控件类子 View 的背景保留。 */
+    private fun clearContainerBackgrounds(view: View) {
+        if (view is ViewGroup) {
+            view.background = null
+            for (i in 0 until view.childCount) {
+                clearContainerBackgrounds(view.getChildAt(i))
+            }
+        }
+    }
+
+    /**
+     * 微信可能在任意一次布局 (键盘/面板/滚动) 里重新给 footer 或其祖先铺上主题色背景,
+     * 每帧 pre-draw 完整重跑 [revealChatBackground] —— 它幂等, 已透明时零写入不触发
+     * 重绘, 只在微信把背景铺回来时把它再次清掉, 保证壁纸持续透出。
+     */
+    private fun trackBackgroundTransparency(footer: ChatFooter) {
+        if (backgroundTrackers.put(footer, true) != null) return
+        footer.viewTreeObserver.addOnPreDrawListener {
+            revealChatBackground(footer)
+            true
+        }
     }
 
     /**
