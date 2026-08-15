@@ -10,43 +10,23 @@ import kotlin.math.roundToInt
 /**
  * Shared visual treatment for floating chat cards.
  *
- * By default light mode keeps WeChat's own backgrounds intact; dark mode needs an explicit
- * surface and a hairline border because Android elevation is barely visible on near-black chat
- * backgrounds. A custom surface color overrides both modes and may carry its own alpha (e.g. a
- * translucent #AARRGGBB for a frosted look); the hairline stroke color can be customized too.
+ * Light mode keeps WeChat's own backgrounds intact. Dark mode needs an explicit surface and a
+ * hairline border because Android elevation is barely visible on near-black chat backgrounds.
  */
 internal object FloatingChatCardVisuals {
 
-    private const val DEFAULT_DARK_SURFACE_COLOR = 0xFF242424.toInt()
-    private const val DEFAULT_STROKE_COLOR = 0x24FFFFFF
-    private const val STROKE_WIDTH_DP = 1
+    private const val DARK_SURFACE_COLOR = 0xFF242424.toInt()
+    private const val DARK_STROKE_COLOR = 0x24FFFFFF
+    private const val DARK_STROKE_WIDTH_DP = 1
 
-    private data class AppliedStyle(
-        val cornerRadiusDp: Int,
-        val strokeWidthPx: Int,
-        val surfaceColor: Int,
-        val strokeColor: Int,
-    )
+    private data class AppliedStyle(val cornerRadiusDp: Int, val strokeWidthPx: Int)
 
     private val originalBackgrounds = WeakHashMap<View, Drawable?>()
     private val appliedBackgrounds = WeakHashMap<View, Drawable>()
     private val appliedStyles = WeakHashMap<View, AppliedStyle>()
 
-    /**
-     * Applies the floating card surface to [view].
-     *
-     * @param customSurfaceColor when null the default behavior applies (dark mode gets the
-     *   built-in surface, light mode keeps WeChat's own background); when set, it is used in
-     *   both modes and its alpha is honored.
-     * @param customStrokeColor hairline border color; null uses the built-in one.
-     */
-    fun applyCardSurface(
-        view: View,
-        cornerRadiusDp: Int,
-        customSurfaceColor: Int? = null,
-        customStrokeColor: Int? = null,
-    ) {
-        if (customSurfaceColor == null && !view.context.isDarkMode) {
+    fun applyDarkSurface(view: View, cornerRadiusDp: Int) {
+        if (!view.context.isDarkMode) {
             restoreOriginalBackground(view)
             return
         }
@@ -56,10 +36,8 @@ internal object FloatingChatCardVisuals {
         }
 
         val density = view.resources.displayMetrics.density
-        val strokeWidthPx = (STROKE_WIDTH_DP * density).roundToInt().coerceAtLeast(1)
-        val surfaceColor = customSurfaceColor ?: DEFAULT_DARK_SURFACE_COLOR
-        val strokeColor = customStrokeColor ?: DEFAULT_STROKE_COLOR
-        val style = AppliedStyle(cornerRadiusDp, strokeWidthPx, surfaceColor, strokeColor)
+        val strokeWidthPx = (DARK_STROKE_WIDTH_DP * density).roundToInt().coerceAtLeast(1)
+        val style = AppliedStyle(cornerRadiusDp, strokeWidthPx)
         val appliedBackground = appliedBackgrounds[view]
         if (appliedStyles[view] == style && view.background === appliedBackground) return
 
@@ -67,8 +45,8 @@ internal object FloatingChatCardVisuals {
         val background = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = radiusPx
-            setColor(surfaceColor)
-            setStroke(strokeWidthPx, strokeColor)
+            setColor(DARK_SURFACE_COLOR)
+            setStroke(strokeWidthPx, DARK_STROKE_COLOR)
         }
         view.background = background
         appliedBackgrounds[view] = background
