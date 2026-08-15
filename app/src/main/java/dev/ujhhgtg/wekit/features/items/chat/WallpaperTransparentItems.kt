@@ -36,35 +36,14 @@ object WallpaperTransparentItems : SwitchFeature(), IResolveDex {
      * com.tencent.mm.ui.chatting.component.v2#m0()I — 时间胶囊背景资源唯一出口。
      * 无日志字符串, 只能按类名 + 方法名 + 签名匹配。
      */
-    private val methodTimePillRes by dexMethod {
-        searchPackages("com.tencent.mm.ui.chatting.component")
-        matcher {
-            name = "m0"
-            returnType = "int"
-        }
-    }
+    private val methodTimePillRes by dexMethod()
 
     /**
      * sg5.f.a(Lfd5/d;Lcom/tencent/mm/storage/e9;Lcom/tencent/mm/ui/chatting/viewitems/g0;
      * Lcom/tencent/mm/ui/chatting/viewitems/a0;Ldf5/b;Lcom/tencent/mm/plugin/msgquote/model/MsgQuoteItem;)V
      * — 引用数据构造器, 第 5 个参数 (index 4) 是 df5/b, 其中 i 字段为背景资源。
      */
-    private val methodQuoteDataBuilder by dexMethod {
-        searchPackages("sg5")
-        matcher {
-            name = "a"
-            paramCount = 6
-            paramTypes(
-                "fd5.d",
-                "com.tencent.mm.storage.e9",
-                "com.tencent.mm.ui.chatting.viewitems.g0",
-                "com.tencent.mm.ui.chatting.viewitems.a0",
-                "df5.b",
-                "com.tencent.mm.plugin.msgquote.model.MsgQuoteItem"
-            )
-            returnType = "void"
-        }
-    }
+    private val methodQuoteDataBuilder by dexMethod()
 
     override fun resolveDex(dexKit: DexKitBridge) {
         methodTimePillRes.find(dexKit, allowFailure = true) {
